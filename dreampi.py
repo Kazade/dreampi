@@ -5,6 +5,8 @@ import os
 import logging
 import sys
 import time
+import subprocess
+
 from datetime import datetime, timedelta
 
 
@@ -91,7 +93,8 @@ class Daemon(object):
 
 def connect_to_modem():
     logging.info("Connecting to modem...")
-    dev = serial.Serial("/dev/" + MODEM_DEVICE, timeout=0)
+
+    dev = serial.Serial("/dev/" + MODEM_DEVICE, 460800, timeout=0)
 
     logging.info("Connected.")
     return dev
@@ -101,6 +104,14 @@ def send_command(modem, command):
     final_command = "%s\r\n" % command
     modem.write(final_command)
     logging.info(final_command)
+
+    line = modem.readline()
+    while True:
+        if "OK" in line or "ERROR" in line or "CONNECT" in line:
+            logging.info(line)
+            break
+
+        line = modem.readline()
 
 
 def main():
@@ -116,37 +127,49 @@ def main():
     time_since_last_digit = None
     time_since_last_dial_tone = datetime.now() - timedelta(seconds=3)
 
+    mode = "LISTENING"
+
     while True:
-        now = datetime.now()
-        delta_seconds = (now - time_since_last_dial_tone).total_seconds()
-        if delta_seconds >= 2.55:
-            #modem.write("AT+VTS=[440,350,255]\r\n") #Generate a dial tone
-            time_since_last_dial_tone = now
-
-        if time_since_last_digit is not None:
-            # We've received some digits, let's answer the call if it's time
+        if mode == "LISTENING":
             now = datetime.now()
-            delta = (now - time_since_last_digit).total_seconds()
-            if delta > 2:
-                logging.info("Answering call...")
-                send_command(modem, "ATH")
-                send_command(modem, "ATA")
-                logging.info("Call answered!")
-                return 0
+            delta_seconds = (now - time_since_last_dial_tone).total_seconds()
+            if delta_seconds >= 2.55:
+    #            modem.write("AT+VTS=[440,350,255]\r\n") #Generate a dial tone
+                time_since_last_dial_tone = now
 
-        char = modem.read(1)
-        if not char:
-            continue
+            if time_since_last_digit is not None:
+                # We've received some digits, let's answer the call if it's time
+                now = datetime.now()
+                delta = (now - time_since_last_digit).total_seconds()
+                if delta > 2:
+                    logging.info("Answering call...")
+                    send_command(modem, "ATH")
+                    send_command(modem, "ATA")
+                    logging.info("Call answered!")
+                    subprocess.check_call(["pon", "dreamcast"])
+                    logging.info("Connected")
+                    mode = "CONNECTED"
 
-        if ord(char) == 16:
-            #DLE character
-            try:
-                char = modem.read()
-                digit = int(char)
-                time_since_last_digit = datetime.now()
-                print "%s" % digit
-            except (TypeError, ValueError):
-                pass
+            char = modem.read(1).strip()
+            if not char:
+                continue
+
+            if ord(char) == 16:
+                #DLE character
+                try:
+                    char = modem.read()
+                    digit = int(char)
+                    time_since_last_digit = datetime.now()
+                    print "%s" % digit
+                except (TypeError, ValueError):
+                    pass
+        elif mode == "CONNECTED":
+            char = modem.readline()
+            if not char:
+                continue
+
+            logging.info(char)
+
 
     return 0
 
