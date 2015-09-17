@@ -6,6 +6,7 @@ import logging
 import sys
 import time
 import subprocess
+import sh
 
 from datetime import datetime, timedelta
 
@@ -114,7 +115,7 @@ def send_command(modem, command):
         line = modem.readline()
 
 
-def main():
+def boot():
     modem = connect_to_modem()
 
     # Send the initialization string to the modem
@@ -122,12 +123,30 @@ def main():
     send_command(modem, "AT+FCLASS=8")  # Switch to Voice mode
     send_command(modem, "AT+VLS=1") # Go online
 
+    if "--enable-dial-tone" in sys.argv:
+        print("Dial tone enabled, starting transmission...")
+        send_command(modem, "AT+VTX=1") # Transmit audio (for dial tone)
+
     logging.info("Setup complete, listening...")
+
+    return modem
+
+def main():
+    modem = boot()
+
+    this_dir = os.path.dirname(os.path.abspath(__file__))
+    dial_tone_wav = os.path.join(this_dir, "dial-tone.wav")
+
+    with open(dial_tone_wav, "rb") as f:
+        dial_tone = f.read() # Read the entire wav file
+        dial_tone = dial_tone[44:] # Strip the header (44 bytes)
 
     time_since_last_digit = None
     time_since_last_dial_tone = datetime.now() - timedelta(seconds=3)
 
     mode = "LISTENING"
+
+    dial_tone_counter = 0
 
     while True:
         if mode == "LISTENING":
@@ -163,13 +182,25 @@ def main():
                     print "%s" % digit
                 except (TypeError, ValueError):
                     pass
+
+            if "--enable-dial-tone" in sys.argv:
+                # Keep sending dial tone
+                byte = dial_tone[dial_tone_counter]
+                dial_tone_counter += 1
+                if dial_tone_counter == len(dial_tone):
+                    dial_tone_counter = 0
+                modem.write(byte)
+
         elif mode == "CONNECTED":
-            char = modem.readline()
-            if not char:
-                continue
-
-            logging.info(char)
-
+            # We start watching /var/log/messages for the hang up message
+            for line in sh.tail("-f", "/var/log/messages", "-n", "1", _iter=True):
+                if "Modem hangup" in line:
+                    logging.info("Detected modem hang up, going back to listening")
+                    time.sleep(10) # Give the hangup some time
+                    mode = "LISTENING"
+                    modem.close()
+                    modem = boot() # Reset the modem
+                    break
 
     return 0
 
@@ -178,7 +209,7 @@ if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
     logging.getLogger().addHandler(logging.StreamHandler())
 
-    if len(sys.argv) > 1 and sys.argv[-1] == "--no-daemon":
+    if len(sys.argv) > 1 and "--no-daemon" in sys.argv:
         sys.exit(main())
 
     daemon = Daemon("/tmp/dreampi.pid", main)
