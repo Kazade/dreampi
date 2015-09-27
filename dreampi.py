@@ -116,6 +116,9 @@ def send_command(modem, command):
 
 
 def boot():
+    # Make sure pppd isn't running
+    subprocess.call(["sudo", "killall", "pppd"])
+
     modem = connect_to_modem()
 
     # Send the initialization string to the modem
@@ -196,10 +199,11 @@ def main():
             for line in sh.tail("-f", "/var/log/messages", "-n", "1", _iter=True):
                 if "Modem hangup" in line:
                     logging.info("Detected modem hang up, going back to listening")
-                    time.sleep(10) # Give the hangup some time
+                    time.sleep(5) # Give the hangup some time
                     mode = "LISTENING"
                     modem.close()
                     modem = boot() # Reset the modem
+                    time_since_last_digit = None
                     break
 
     return 0
