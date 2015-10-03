@@ -3,12 +3,16 @@
 import serial
 import os
 import logging
+import logging.handlers
 import sys
 import time
 import subprocess
 import sh
 
 from datetime import datetime, timedelta
+
+
+logger = logging.getLogger('dreampi')
 
 
 MODEM_DEVICE = "ttyACM0"
@@ -58,10 +62,10 @@ class Daemon(object):
         pid = self._read_pid_from_pidfile()
 
         if pid:
-            logging.info("Daemon already running, exiting")
+            logger.info("Daemon already running, exiting")
             sys.exit(1)
 
-        logging.info("Starting daemon")
+        logger.info("Starting daemon")
         self.daemonize()
         self.run()
 
@@ -69,7 +73,7 @@ class Daemon(object):
         pid = self._read_pid_from_pidfile()
 
         if not pid:
-            logging.info("pidfile doesn't exist, deamon must not be running")
+            logger.info("pidfile doesn't exist, deamon must not be running")
             return
 
         try:
@@ -93,23 +97,23 @@ class Daemon(object):
 
 
 def connect_to_modem():
-    logging.info("Connecting to modem...")
+    logger.info("Connecting to modem...")
 
     dev = serial.Serial("/dev/" + MODEM_DEVICE, 460800, timeout=0)
 
-    logging.info("Connected.")
+    logger.info("Connected.")
     return dev
 
 
 def send_command(modem, command):
     final_command = "%s\r\n" % command
     modem.write(final_command)
-    logging.info(final_command)
+    logger.info(final_command)
 
     line = modem.readline()
     while True:
         if "OK" in line or "ERROR" in line or "CONNECT" in line:
-            logging.info(line)
+            logger.info(line)
             break
 
         line = modem.readline()
@@ -130,14 +134,14 @@ def boot():
         print("Dial tone enabled, starting transmission...")
         send_command(modem, "AT+VTX=1") # Transmit audio (for dial tone)
 
-    logging.info("Setup complete, listening...")
+    logger.info("Setup complete, listening...")
 
     return modem
 
 def main():
     modem = boot()
 
-    this_dir = os.path.dirname(os.path.abspath(__file__))
+    this_dir = os.path.dirname(os.path.abspath(os.path.realpath(__file__)))
     dial_tone_wav = os.path.join(this_dir, "dial-tone.wav")
 
     with open(dial_tone_wav, "rb") as f:
@@ -164,12 +168,12 @@ def main():
                 now = datetime.now()
                 delta = (now - time_since_last_digit).total_seconds()
                 if delta > 2:
-                    logging.info("Answering call...")
+                    logger.info("Answering call...")
                     send_command(modem, "ATH")
                     send_command(modem, "ATA")
-                    logging.info("Call answered!")
+                    logger.info("Call answered!")
                     subprocess.check_call(["pon", "dreamcast"])
-                    logging.info("Connected")
+                    logger.info("Connected")
                     mode = "CONNECTED"
 
             char = modem.read(1).strip()
@@ -198,7 +202,7 @@ def main():
             # We start watching /var/log/messages for the hang up message
             for line in sh.tail("-f", "/var/log/messages", "-n", "1", _iter=True):
                 if "Modem hangup" in line:
-                    logging.info("Detected modem hang up, going back to listening")
+                    logger.info("Detected modem hang up, going back to listening")
                     time.sleep(5) # Give the hangup some time
                     mode = "LISTENING"
                     modem.close()
@@ -210,8 +214,10 @@ def main():
 
 
 if __name__ == '__main__':
-    logging.getLogger().setLevel(logging.INFO)
-    logging.getLogger().addHandler(logging.StreamHandler())
+    logger.setLevel(logging.INFO)
+    logger.addHandler(logging.StreamHandler())
+    handler = logging.handlers.SysLogHandler(address='/dev/log')
+    logger.addHandler(handler)
 
     if len(sys.argv) > 1 and "--no-daemon" in sys.argv:
         sys.exit(main())
