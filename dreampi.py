@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import atexit
 import serial
 import os
 import logging
@@ -23,7 +24,7 @@ class Daemon(object):
         self.pidfile = pidfile
         self.process = process
 
-    def deamonize(self):
+    def daemonize(self):
         try:
             pid = os.fork()
             if pid > 0:
@@ -215,18 +216,18 @@ def main():
 
 if __name__ == '__main__':
     logger.setLevel(logging.INFO)
-    logger.addHandler(logging.StreamHandler())
     handler = logging.handlers.SysLogHandler(address='/dev/log')
     logger.addHandler(handler)
 
     if len(sys.argv) > 1 and "--no-daemon" in sys.argv:
+        logger.addHandler(logging.StreamHandler())
         sys.exit(main())
 
     daemon = Daemon("/tmp/dreampi.pid", main)
 
     if len(sys.argv) == 2:
         if sys.argv[1] == "start":
-            deamon.start()
+            daemon.start()
         elif sys.argv[1] == "stop":
             daemon.stop()
         elif sys.argv[1] == "restart":
