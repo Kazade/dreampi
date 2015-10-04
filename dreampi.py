@@ -10,14 +10,34 @@ import time
 import subprocess
 import sh
 import signal
+import re
 
 from datetime import datetime, timedelta
 
 
 logger = logging.getLogger('dreampi')
 
+def detect_device_and_speed():
+    command = [ "wvdialconf", "/dev/null" ]
 
-MODEM_DEVICE = "ttyACM0"
+    try:
+        output = subprocess.check_output(command, stderr=subprocess.STDOUT)
+
+        lines = output.split("\n")
+
+        for line in lines:
+            match = re.match("(.+)\<Info\>\:\sSpeed\s(\d+);", line.strip())
+            if match:
+                device = match.group(1)
+                speed = match.group(2)
+                logger.info("Detected device {} with speed {}".format(device, speed))
+                return device, speed
+        else:
+            logger.info("No device detected")
+
+    except OSError:
+        logger.warning("Unable to detect modem. Falling back to ttyACM0")
+    return ("ttyACM0", 460800)
 
 
 class Daemon(object):
@@ -100,9 +120,11 @@ class Daemon(object):
 
 
 def connect_to_modem():
+    MODEM_DEVICE, DEVICE_SPEED = detect_device_and_speed()
+
     logger.info("Connecting to modem...")
 
-    dev = serial.Serial("/dev/" + MODEM_DEVICE, 460800, timeout=0)
+    dev = serial.Serial("/dev/" + MODEM_DEVICE, DEVICE_SPEED, timeout=0)
 
     logger.info("Connected.")
     return dev
