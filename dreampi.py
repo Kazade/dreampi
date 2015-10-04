@@ -9,6 +9,7 @@ import sys
 import time
 import subprocess
 import sh
+import signal
 
 from datetime import datetime, timedelta
 
@@ -58,6 +59,7 @@ class Daemon(object):
                 pid = int(pf.read().strip())
         except IOError:
             pid = None
+        return pid
 
     def start(self):
         pid = self._read_pid_from_pidfile()
@@ -79,7 +81,7 @@ class Daemon(object):
 
         try:
             while True:
-                os.kill(pid, SIGTERM)
+                os.kill(pid, signal.SIGTERM)
                 time.sleep(0.1)
 
         except OSError as err:
