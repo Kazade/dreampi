@@ -207,6 +207,7 @@ def main():
                     logger.info(subprocess.check_output(["pon", "dreamcast"]))
                     logger.info("Connected")
                     mode = "CONNECTED"
+                    continue
 
             if dial_tone_enabled:
                 # Keep sending dial tone
