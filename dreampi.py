@@ -143,11 +143,13 @@ def send_command(modem, command):
 
     line = modem.readline()
     while True:
-        if "OK" in line or "ERROR" in line or "CONNECT" in line:
+        if "OK" in line or "ERROR" in line or "CONNECT" in line or "VCON" in line:
             logger.info(line)
             break
 
         line = modem.readline()
+        if line.strip():
+            logger.info(line + "\n")
 
 
 def boot(dial_tone_enabled):
@@ -162,7 +164,7 @@ def boot(dial_tone_enabled):
     send_command(modem, "AT+VLS=1") # Go online
 
     if dial_tone_enabled:
-        print("Dial tone enabled, starting transmission...")
+        logger.info("Dial tone enabled, starting transmission...")
         send_command(modem, "AT+VSM=1,8000") # 8 bit, unsigned PCM at 8000hz
         send_command(modem, "AT+VTX") # Transmit audio (for dial tone)
 
@@ -170,7 +172,8 @@ def boot(dial_tone_enabled):
 
     return modem
 
-def main():
+
+def process():
     dial_tone_enabled = not "--disable-dial-tone" in sys.argv
     modem = boot(dial_tone_enabled)
 
@@ -197,11 +200,17 @@ def main():
                 delta = (now - time_since_last_digit).total_seconds()
                 if delta > 1:
                     if dial_tone_enabled:
-                        time.sleep(1.5)
-                        modem.write("+++\r\n") # Re-enter command mode
-                        time.sleep(1.5)
+                        modem.write("\0{}{}\r\n".format(chr(0x10), chr(0x03)))
+                        time.sleep(5.0)
+                        modem.write("+++")
+                        time.sleep(5.0)
+
                     logger.info("Answering call...")
-                    send_command(modem, "ATH")
+                    send_command(modem, "ATH0")
+                    send_command(modem, "AT+VLS=0")
+                    send_command(modem, "ATZ0")
+                    send_command(modem, "AT+FCLASS=0")
+                    send_command(modem, "AT+VLS=1") # Go online
                     send_command(modem, "ATA")
                     logger.info("Call answered!")
                     logger.info(subprocess.check_output(["pon", "dreamcast"]))
@@ -234,8 +243,6 @@ def main():
                     digit = int(char)
 
                     time_since_last_digit = datetime.now()
-                    if dial_tone_enabled:
-                        send_command(modem, "{}{}".format(chr(0x10), "!")) #Stop playing audio
                     print "%s" % digit
                 except (TypeError, ValueError):
                     pass
@@ -256,6 +263,14 @@ def main():
                     break
 
     return 0
+
+
+def main():
+    try:
+        return process()
+    except:
+        logger.exception("Something went wrong...")
+        return 1
 
 
 if __name__ == '__main__':
