@@ -18,6 +18,32 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger('dreampi')
 
+
+def autoconfigure_ppp(device):
+    """
+       Every network is different, this function runs on boot and tries
+       to autoconfigure PPP as best it can by detecting the subnet and gateway
+       we're running on
+    """
+
+    PEERS_TEMPLATE = """
+{device}
+115200
+{this_ip}:{dc_ip}
+noauth
+    """.strip()
+
+    gateway_ip = subprocess.check_output("route -n | grep 'UG[ \t]' | awk '{print $2}'", shell=True)
+
+    this_ip = "{}.{}.{}.100".format(*gateway_ip.split(".")[:3])
+    dreamcast_ip = "{}.{}.{}.101".format(*gateway_ip.split(".")[:3])
+
+    peers_content = PEERS_TEMPLATE.format(device=device, this_ip=this_ip, dc_ip=dreamcast_ip)
+
+    with open("/etc/ppp/peers/dreamcast", "w") as f:
+        f.write(peers_content)    
+
+
 def detect_device_and_speed():
     command = [ "wvdialconf", "/dev/null" ]
 
@@ -148,8 +174,6 @@ def send_command(modem, command):
             break
 
         line = modem.readline()
-        if line.strip():
-            logger.info(line + "\n")
 
 
 def boot(dial_tone_enabled):
@@ -176,6 +200,8 @@ def boot(dial_tone_enabled):
 def process():
     dial_tone_enabled = not "--disable-dial-tone" in sys.argv
     modem = boot(dial_tone_enabled)
+
+    autoconfigure_ppp(MODEM_DEVICE) # By this point, MODEM_DEVICE has been set
 
     this_dir = os.path.dirname(os.path.abspath(os.path.realpath(__file__)))
     dial_tone_wav = os.path.join(this_dir, "dial-tone.wav")
