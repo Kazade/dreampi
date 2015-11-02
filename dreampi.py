@@ -227,16 +227,16 @@ def process():
                 if delta > 1:
                     if dial_tone_enabled:
                         modem.write("\0{}{}\r\n".format(chr(0x10), chr(0x03)))
-                        time.sleep(5.0)
+                        time.sleep(1.2)
                         modem.write("+++")
-                        time.sleep(5.0)
+                        time.sleep(1.2)
 
                     logger.info("Answering call...")
                     send_command(modem, "ATH0")
                     send_command(modem, "AT+VLS=0")
                     send_command(modem, "ATZ0")
                     send_command(modem, "AT+FCLASS=0")
-                    send_command(modem, "AT+VLS=1") # Go online
+                    #send_command(modem, "AT+VLS=1") # Go online
                     send_command(modem, "ATA")
                     logger.info("Call answered!")
                     logger.info(subprocess.check_output(["pon", "dreamcast"]))
