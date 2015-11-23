@@ -41,7 +41,7 @@ noauth
     peers_content = PEERS_TEMPLATE.format(device=device, this_ip=this_ip, dc_ip=dreamcast_ip)
 
     with open("/etc/ppp/peers/dreamcast", "w") as f:
-        f.write(peers_content)    
+        f.write(peers_content)
 
 
 def detect_device_and_speed():
@@ -178,7 +178,8 @@ def send_command(modem, command):
 
 def boot(dial_tone_enabled):
     # Make sure pppd isn't running
-    subprocess.call(["sudo", "killall", "pppd"])
+    with open(os.devnull, 'wb') as devnull:
+        subprocess.call(["sudo", "killall", "pppd"], stderr=devnull)
 
     modem = connect_to_modem()
 
@@ -236,6 +237,10 @@ def process():
                     send_command(modem, "AT+VLS=0")
                     send_command(modem, "ATZ0")
                     send_command(modem, "AT+FCLASS=0")
+
+                    # Just give the modem a chance to breath...
+                    time.sleep(1.0)
+
                     #send_command(modem, "AT+VLS=1") # Go online
                     send_command(modem, "ATA")
                     logger.info("Call answered!")
@@ -269,7 +274,7 @@ def process():
                     digit = int(char)
 
                     time_since_last_digit = datetime.now()
-                    print "%s" % digit
+                    logger.info("Heard: %s", digit)
                 except (TypeError, ValueError):
                     pass
 
