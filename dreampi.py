@@ -12,6 +12,9 @@ import sh
 import signal
 import re
 import struct
+import threading
+import itertools
+import socket
 
 from datetime import datetime, timedelta
 
@@ -41,7 +44,7 @@ noauth
     peers_content = PEERS_TEMPLATE.format(device=device, this_ip=this_ip, dc_ip=dreamcast_ip)
 
     with open("/etc/ppp/peers/dreamcast", "w") as f:
-        f.write(peers_content)    
+        f.write(peers_content)
 
 
 def detect_device_and_speed():
@@ -145,6 +148,61 @@ class Daemon(object):
         self.process()
 
 
+GAME_SOCKETS = {
+    "Quake III": (1025, 1026, 1027, 1028, 1029, 1030, 1031),
+}
+
+
+class DreamArenaWorker(threading.Thread):
+    def __init__(self, port, *args, **kwargs):
+        super(DreamArenaWorker, self).__init__(*args, **kwargs)
+        self._running = True
+        self._socket = None
+        self._port = port
+
+    def run(self):
+        self.boot()
+
+        try:
+            while self._running:
+                logger.info(self._socket.recv(4096))
+                pass
+
+        finally:
+            self.shutdown()
+
+    def stop(self):
+        self._running = False
+
+    def boot(self):
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._socket.bind(("", self._port))
+        logger.info("Created socket on port: %s", self._port)
+
+    def shutdown(self):
+        pass
+
+
+class DreamArena(object):
+    """
+        Simulates DreamArena authentication
+    """
+
+    def __init__(self, *args, **kwargs):
+        self._running = True
+        self._sockets = []
+
+    def start(self):
+        logger.info("Starting DreamArena authentication service")
+        for port in itertools.chain(*GAME_SOCKETS.values()):
+            self._sockets.append(DreamArenaWorker(port))
+            self._sockets[-1].start()
+
+    def stop(self):
+        for socket in self._sockets:
+            socket.stop()
+            socket.join()
+
 MODEM_DEVICE = None
 DEVICE_SPEED = None
 def connect_to_modem():
@@ -215,6 +273,8 @@ def process():
 
     mode = "LISTENING"
 
+    dream_arena = DreamArena()
+
     dial_tone_counter = 0
     while True:
         if mode == "LISTENING":
@@ -231,6 +291,9 @@ def process():
                         modem.write("+++")
                         time.sleep(1.2)
 
+                    # Start listening for DreamArena authentication
+                    dream_arena.start()
+
                     logger.info("Answering call...")
                     send_command(modem, "ATH0")
                     send_command(modem, "AT+VLS=0")
@@ -239,6 +302,7 @@ def process():
                     #send_command(modem, "AT+VLS=1") # Go online
                     send_command(modem, "ATA")
                     logger.info("Call answered!")
+
                     logger.info(subprocess.check_output(["pon", "dreamcast"]))
                     logger.info("Connected")
                     mode = "CONNECTED"
@@ -286,6 +350,8 @@ def process():
                     dial_tone_enabled = not "--disable-dial-tone" in sys.argv
                     modem = boot(dial_tone_enabled) # Reset the modem
                     time_since_last_digit = None
+
+                    dream_arena.stop()
                     break
 
     return 0
