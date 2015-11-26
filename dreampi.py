@@ -147,7 +147,7 @@ class Daemon(object):
 
 MODEM_DEVICE = None
 DEVICE_SPEED = None
-COMM_SPEED = 9600
+COMM_SPEED = 115200
 
 def connect_to_modem():
     global MODEM_DEVICE
