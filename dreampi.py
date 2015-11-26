@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 logger = logging.getLogger('dreampi')
 
 
-def autoconfigure_ppp(device):
+def autoconfigure_ppp(device, speed):
     """
        Every network is different, this function runs on boot and tries
        to autoconfigure PPP as best it can by detecting the subnet and gateway
@@ -28,7 +28,7 @@ def autoconfigure_ppp(device):
 
     PEERS_TEMPLATE = """
 {device}
-115200
+{device_speed}
 {this_ip}:{dc_ip}
 noauth
     """.strip()
@@ -38,7 +38,7 @@ noauth
     this_ip = "{}.{}.{}.100".format(*gateway_ip.split(".")[:3])
     dreamcast_ip = "{}.{}.{}.101".format(*gateway_ip.split(".")[:3])
 
-    peers_content = PEERS_TEMPLATE.format(device=device, this_ip=this_ip, dc_ip=dreamcast_ip)
+    peers_content = PEERS_TEMPLATE.format(device=device, device_speed=speed, this_ip=this_ip, dc_ip=dreamcast_ip)
 
     with open("/etc/ppp/peers/dreamcast", "w") as f:
         f.write(peers_content)
@@ -147,6 +147,8 @@ class Daemon(object):
 
 MODEM_DEVICE = None
 DEVICE_SPEED = None
+COMM_SPEED = 9600
+
 def connect_to_modem():
     global MODEM_DEVICE
     global DEVICE_SPEED
@@ -156,7 +158,7 @@ def connect_to_modem():
 
     logger.info("Connecting to modem...")
 
-    dev = serial.Serial("/dev/" + MODEM_DEVICE, DEVICE_SPEED, timeout=0)
+    dev = serial.Serial("/dev/" + MODEM_DEVICE, COMM_SPEED, timeout=0)
 
     logger.info("Connected.")
     return dev
@@ -202,7 +204,7 @@ def process():
     dial_tone_enabled = not "--disable-dial-tone" in sys.argv
     modem = boot(dial_tone_enabled)
 
-    autoconfigure_ppp(MODEM_DEVICE) # By this point, MODEM_DEVICE has been set
+    autoconfigure_ppp(MODEM_DEVICE, DEVICE_SPEED) # By this point, MODEM_DEVICE has been set
 
     this_dir = os.path.dirname(os.path.abspath(os.path.realpath(__file__)))
     dial_tone_wav = os.path.join(this_dir, "dial-tone.wav")
