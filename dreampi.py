@@ -26,6 +26,20 @@ def autoconfigure_ppp(device, speed):
        we're running on
     """
 
+    gateway_ip = subprocess.check_output("route -n | grep 'UG[ \t]' | awk '{print $2}'", shell=True)
+    subnet = gateway_ip.split(".")[:3]
+
+    def find_unused_ips():
+        try:
+            ARP_SCAN_COMMAND = [ "sudo", "arp-scan", "{}.{}.{}.0/24".format(*subnet) ]
+            scan_results = subprocess.check_output(ARP_SCAN_COMMAND)
+            used_ips = set([int(x.split()[0].split(".")[-1]) for x in scan_results.split("\n")[2:-4]])
+            free_ips = ("{}.{}.{}.{}".format(*(subnet + [x])) for x in range(99, 1, -1) if x not in used_ips)
+            return free_ips.next(), free_ips.next()
+        except:
+            logger.exception("Couldn't detect free IPs. Using .98 and .99")
+            return "{}.{}.{}.98".format(*subnet), "{}.{}.{}.99".format(*subnet)
+
     PEERS_TEMPLATE = """
 {device}
 {device_speed}
@@ -33,15 +47,25 @@ def autoconfigure_ppp(device, speed):
 noauth
     """.strip()
 
-    gateway_ip = subprocess.check_output("route -n | grep 'UG[ \t]' | awk '{print $2}'", shell=True)
+    OPTIONS_TEMPLATE = """
+debug
+require-pap
+ms-dns {}
+proxyarp
+ktune
+    """.strip()
 
-    this_ip = "{}.{}.{}.100".format(*gateway_ip.split(".")[:3])
-    dreamcast_ip = "{}.{}.{}.101".format(*gateway_ip.split(".")[:3])
+    this_ip, dreamcast_ip = find_unused_ips()
 
     peers_content = PEERS_TEMPLATE.format(device=device, device_speed=speed, this_ip=this_ip, dc_ip=dreamcast_ip)
 
     with open("/etc/ppp/peers/dreamcast", "w") as f:
         f.write(peers_content)
+
+    options_content = OPTIONS_TEMPLATE.format(this_ip)
+
+    with open("/etc/ppp/options", "w") as f:
+        f.write(options_content)
 
 
 def detect_device_and_speed():
