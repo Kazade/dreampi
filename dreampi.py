@@ -169,142 +169,167 @@ class Daemon(object):
         self.process()
 
 
-MODEM_DEVICE = None
-DEVICE_SPEED = None
-COMM_SPEED = 115200
+class Modem(object):
+    def __init__(self, comm_speed=None, send_dial_tone=True):
+        self._device, self._speed = detect_device_and_speed()
+        self._comm_speed = comm_speed or self._speed
+        self._serial = None
+        self._sending_tone = False
 
-def connect_to_modem():
-    global MODEM_DEVICE
-    global DEVICE_SPEED
+        if send_dial_tone:
+            self._dial_tone_wav = self._read_dial_tone()
+        else:
+            self._dial_tone_wav = None
 
-    if not MODEM_DEVICE:
-        MODEM_DEVICE, DEVICE_SPEED = detect_device_and_speed()
+        self._time_since_last_dial_tone = None
+        self._dial_tone_counter = 0
 
-    logger.info("Connecting to modem...")
+    @property
+    def device_speed(self):
+        return self._speed
 
-    dev = serial.Serial("/dev/" + MODEM_DEVICE, COMM_SPEED, timeout=0)
+    @property
+    def device_name(self):
+        return self._device
 
-    logger.info("Connected.")
-    return dev
+    def _read_dial_tone(self):
+        this_dir = os.path.dirname(os.path.abspath(os.path.realpath(__file__)))
+        dial_tone_wav = os.path.join(this_dir, "dial-tone.wav")
 
+        with open(dial_tone_wav, "rb") as f:
+            dial_tone = f.read() # Read the entire wav file
+            dial_tone = dial_tone[44:] # Strip the header (44 bytes)
 
-def send_command(modem, command):
-    final_command = "%s\r\n" % command
-    modem.write(final_command)
-    logger.info(final_command)
+        return dial_tone
 
-    line = modem.readline()
-    while True:
-        if "OK" in line or "ERROR" in line or "CONNECT" in line or "VCON" in line:
-            logger.info(line)
-            break
+    def connect(self):
+        if self._serial:
+            self.disconnect()
 
-        line = modem.readline()
+        logger.info("Opening serial interface to {}".format(self._device))
+        self._serial = serial.Serial("/dev/{}".format(self._device), self._comm_speed, timeout=0)
 
+    def disconnect(self):
+        if self._serial and self._serial.isOpen():
+            self._serial.close()
+            self._serial = None
+            logger.info("Serial interface terminated")
 
-def boot(dial_tone_enabled):
-    # Make sure pppd isn't running
-    with open(os.devnull, 'wb') as devnull:
-        subprocess.call(["sudo", "killall", "pppd"], stderr=devnull)
+    def reset(self):
+        self.send_command("ATZ0") # Send reset command
 
-    modem = connect_to_modem()
+    def start_dial_tone(self):
+        if not self._dial_tone_wav:
+            return
 
-    # Send the initialization string to the modem
-    send_command(modem, "ATZE1") # RESET
-    send_command(modem, "AT+FCLASS=8")  # Switch to Voice mode
-    send_command(modem, "AT+VLS=1") # Go online
+        self.reset()
+        self.send_command("AT+FCLASS=8") # Enter voice mode
+        self.send_command("AT+VLS=1") # Go off-hook
+        self.send_command("AT+VSM=1,8000") # 8 bit unsigned PCM
+        self.send_command("AT+VTX") # Voice transmission mode
 
-    if dial_tone_enabled:
-        logger.info("Dial tone enabled, starting transmission...")
-        send_command(modem, "AT+VSM=1,8000") # 8 bit, unsigned PCM at 8000hz
-        send_command(modem, "AT+VTX") # Transmit audio (for dial tone)
+        self._sending_tone = True
+        self._time_since_last_dial_tone = datetime.now() - timedelta(seconds=100)
+        self._dial_tone_counter = 0
 
-    logger.info("Setup complete, listening...")
+    def stop_dial_tone(self):
+        if not self._sending_tone:
+            return
 
-    return modem
+        self._serial.write("\0{}{}\r\n".format(chr(0x10), chr(0x03)))
+        self.send_escape()
+        self.send_command("ATH0") # Go on-hook
+        self.reset() #Reset the modem
+        self._sending_tone = False
+
+    def answer(self):
+        self.reset()
+        self.send_command("ATA")
+        time.sleep(2)
+        logger.info("Call answered!")
+        logger.info(subprocess.check_output(["pon", "dreamcast"]))
+        logger.info("Connected")
+
+    def send_command(self, command):
+        final_command = "%s\r\n" % command
+        self._serial.write(final_command)
+        logger.info(final_command)
+
+        line = self._serial.readline()
+        while True:
+            if "OK" in line or "ERROR" in line or "CONNECT" in line or "VCON" in line:
+                logger.info(line)
+                break
+
+            line = self._serial.readline()
+
+    def send_escape(self):
+        time.sleep(1.0)
+        self._serial.write("+++")
+        time.sleep(1.0)
+
+    def update(self):
+        now = datetime.now()
+        if self._sending_tone:
+            # Keep sending dial tone
+            BUFFER_LENGTH = 1000
+            TIME_BETWEEN_UPLOADS_MS = (1000.0 / 8000.0) * BUFFER_LENGTH
+
+            milliseconds = (now - self._time_since_last_dial_tone).microseconds * 1000
+            if not self._time_since_last_dial_tone or milliseconds >= TIME_BETWEEN_UPLOADS_MS:
+                byte = self._dial_tone_wav[self._dial_tone_counter:self._dial_tone_counter+BUFFER_LENGTH]
+                self._dial_tone_counter += BUFFER_LENGTH
+                if self._dial_tone_counter >= len(self._dial_tone_wav):
+                    self._dial_tone_counter = 0
+                self._serial.write(byte)
+                self._time_since_last_dial_tone = now
+
 
 
 def process():
     dial_tone_enabled = not "--disable-dial-tone" in sys.argv
-    modem = boot(dial_tone_enabled)
 
-    autoconfigure_ppp(MODEM_DEVICE, DEVICE_SPEED) # By this point, MODEM_DEVICE has been set
+    # Make sure pppd isn't running
+    with open(os.devnull, 'wb') as devnull:
+        subprocess.call(["sudo", "killall", "pppd"], stderr=devnull)
 
-    this_dir = os.path.dirname(os.path.abspath(os.path.realpath(__file__)))
-    dial_tone_wav = os.path.join(this_dir, "dial-tone.wav")
-
-    with open(dial_tone_wav, "rb") as f:
-        dial_tone = f.read() # Read the entire wav file
-        dial_tone = dial_tone[44:] # Strip the header (44 bytes)
-
-    time_since_last_digit = None
-    time_since_last_dial_tone = datetime.now() - timedelta(seconds=100)
+    modem = Modem(115200, dial_tone_enabled)
+    autoconfigure_ppp(modem.device_name, modem.device_speed)
 
     mode = "LISTENING"
 
-    dial_tone_counter = 0
+    modem.connect()
+    if dial_tone_enabled:
+        modem.start_dial_tone()
+
+    time_digit_heard = None
+
     while True:
+        now = datetime.now()
+
         if mode == "LISTENING":
-            now = datetime.now()
-
-            if time_since_last_digit is not None:
-                # We've received some digits, let's answer the call if it's time
-                now = datetime.now()
-                delta = (now - time_since_last_digit).total_seconds()
-                if delta > 1:
-                    if dial_tone_enabled:
-                        modem.write("\0{}{}\r\n".format(chr(0x10), chr(0x03)))
-                        time.sleep(1.2)
-                        modem.write("+++")
-                        time.sleep(1.2)
-
-                    logger.info("Answering call...")
-                    send_command(modem, "ATH0")
-                    send_command(modem, "AT+VLS=0")
-                    send_command(modem, "ATZ0")
-                    send_command(modem, "AT+FCLASS=0")
-
-                    # Just give the modem a chance to breath...
-                    time.sleep(1.0)
-
-                    #send_command(modem, "AT+VLS=1") # Go online
-                    send_command(modem, "ATA")
-                    logger.info("Call answered!")
-                    logger.info(subprocess.check_output(["pon", "dreamcast"]))
-                    logger.info("Connected")
-                    mode = "CONNECTED"
-                    continue
-
-            if dial_tone_enabled:
-                # Keep sending dial tone
-                BUFFER_LENGTH = 1000
-                TIME_BETWEEN_UPLOADS_MS = (1000.0 / 8000.0) * BUFFER_LENGTH
-
-                milliseconds = (now - time_since_last_dial_tone).microseconds * 1000
-                if not time_since_last_dial_tone or milliseconds >= TIME_BETWEEN_UPLOADS_MS:
-                    byte = dial_tone[dial_tone_counter:dial_tone_counter+BUFFER_LENGTH]
-                    dial_tone_counter += BUFFER_LENGTH
-                    if dial_tone_counter >= len(dial_tone):
-                        dial_tone_counter = 0
-                    modem.write(byte)
-                    time_since_last_dial_tone = now
-
-            char = modem.read(1).strip()
+            modem.update()
+            char = modem._serial.read(1).strip()
             if not char:
                 continue
 
             if ord(char) == 16:
                 #DLE character
                 try:
-                    char = modem.read()
+                    char = modem._serial.read(1)
                     digit = int(char)
-
-                    time_since_last_digit = datetime.now()
                     logger.info("Heard: %s", digit)
+
+                    mode = "ANSWERING"
+                    modem.stop_dial_tone()
+                    time_digit_heard = now
                 except (TypeError, ValueError):
                     pass
-
-
+        elif mode == "ANSWERING":
+            if (now - time_digit_heard).total_seconds() > 8.0:
+                time_digit_heard = None
+                modem.answer()
+                mode = "CONNECTED"
 
         elif mode == "CONNECTED":
             # We start watching /var/log/messages for the hang up message
@@ -312,12 +337,14 @@ def process():
                 if "Modem hangup" in line:
                     logger.info("Detected modem hang up, going back to listening")
                     time.sleep(5) # Give the hangup some time
-                    mode = "LISTENING"
-                    modem.close()
-                    dial_tone_enabled = not "--disable-dial-tone" in sys.argv
-                    modem = boot(dial_tone_enabled) # Reset the modem
-                    time_since_last_digit = None
                     break
+
+            mode = "LISTENING"
+            modem.disconnect()
+            modem = Modem(115200, dial_tone_enabled)
+            modem.connect()
+            if dial_tone_enabled:
+                modem.start_dial_tone()
 
     return 0
 
