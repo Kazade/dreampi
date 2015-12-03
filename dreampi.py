@@ -49,10 +49,10 @@ noauth
 
     OPTIONS_TEMPLATE = """
 debug
-require-pap
 ms-dns {}
 proxyarp
 ktune
+noccp
     """.strip()
 
     this_ip, dreamcast_ip = find_unused_ips()
@@ -293,7 +293,7 @@ def process():
     with open(os.devnull, 'wb') as devnull:
         subprocess.call(["sudo", "killall", "pppd"], stderr=devnull)
 
-    modem = Modem(115200, dial_tone_enabled)
+    modem = Modem(None, dial_tone_enabled)
     autoconfigure_ppp(modem.device_name, modem.device_speed)
 
     mode = "LISTENING"
@@ -341,7 +341,7 @@ def process():
 
             mode = "LISTENING"
             modem.disconnect()
-            modem = Modem(115200, dial_tone_enabled)
+            modem = Modem(None, dial_tone_enabled)
             modem.connect()
             if dial_tone_enabled:
                 modem.start_dial_tone()
