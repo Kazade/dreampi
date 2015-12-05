@@ -250,18 +250,30 @@ class Modem(object):
         logger.info(subprocess.check_output(["pon", "dreamcast"]))
         logger.info("Connected")
 
-    def send_command(self, command):
+    def send_command(self, command, timeout=10):
+        VALID_RESPONSES = ("OK", "ERROR", "CONNECT", "VCON")
+
         final_command = "%s\r\n" % command
         self._serial.write(final_command)
         logger.info(final_command)
 
-        line = self._serial.readline()
-        while True:
-            if "OK" in line or "ERROR" in line or "CONNECT" in line or "VCON" in line:
-                logger.info(line)
-                break
+        start = datetime.now()
 
-            line = self._serial.readline()
+        line = ""
+        while True:
+            new_data = self._serial.readline().strip()
+
+            if not new_data:
+                continue
+
+            line = line + new_data
+            for resp in VALID_RESPONSES:
+                if resp in line:
+                    logger.info(line[line.find(resp):])
+                    return # We are done
+
+            if (datetime.now() - start).total_seconds() > timeout:
+                raise IOError("There was a timeout while waiting for a response from the modem")
 
     def send_escape(self):
         time.sleep(1.0)
