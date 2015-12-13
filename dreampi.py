@@ -31,9 +31,9 @@ def autoconfigure_ppp(device, speed):
 
     def find_unused_ips():
         try:
-            ARP_SCAN_COMMAND = [ "sudo", "arp-scan", "{}.{}.{}.0/24".format(*subnet) ]
+            ARP_SCAN_COMMAND = [ "arp", "-n" ]
             scan_results = subprocess.check_output(ARP_SCAN_COMMAND)
-            used_ips = set([int(x.split()[0].split(".")[-1]) for x in scan_results.split("\n")[2:-4]])
+            used_ips = set([int(x.split(" ")[0].split(".")[-1]) for x in scan_results.split("\n")[1:] if x.strip()])
             free_ips = ("{}.{}.{}.{}".format(*(subnet + [x])) for x in range(99, 1, -1) if x not in used_ips)
             return free_ips.next(), free_ips.next()
         except:
@@ -56,6 +56,7 @@ noccp
     """.strip()
 
     this_ip, dreamcast_ip = find_unused_ips()
+    logger.info("Dreamcast IP: {}".format(dreamcast_ip))
 
     peers_content = PEERS_TEMPLATE.format(device=device, device_speed=speed, this_ip=this_ip, dc_ip=dreamcast_ip)
 
@@ -216,7 +217,7 @@ class Modem(object):
             logger.info("Serial interface terminated")
 
     def reset(self):
-        self.send_command("ATZ0") # Send reset command
+        self.send_command("ATZ0&E0") # Send reset command
 
     def start_dial_tone(self):
         if not self._dial_tone_wav:
