@@ -252,7 +252,7 @@ class Modem(object):
         logger.info(subprocess.check_output(["pon", "dreamcast"]))
         logger.info("Connected")
 
-    def send_command(self, command, timeout=10):
+    def send_command(self, command, timeout=30):
         VALID_RESPONSES = ("OK", "ERROR", "CONNECT", "VCON")
 
         final_command = "%s\r\n" % command
