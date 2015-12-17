@@ -217,7 +217,8 @@ class Modem(object):
             logger.info("Serial interface terminated")
 
     def reset(self):
-        self.send_command("ATZ0&E0") # Send reset command
+        self.send_command("ATZ0") # Send reset command
+        self.send_command("ATE0") # Don't echo our responses
 
     def start_dial_tone(self):
         if not self._dial_tone_wav:
