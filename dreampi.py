@@ -13,7 +13,7 @@ import signal
 import re
 import struct
 
-from .dcnow import DreamcastNowService
+from dcnow import DreamcastNowService
 
 from datetime import datetime, timedelta
 

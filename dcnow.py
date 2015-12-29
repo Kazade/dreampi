@@ -21,6 +21,7 @@ class DreamcastNowThread(threading.Thread):
     def __init__(self, service):
         self._service = service
         self._running = True
+        super(DreamcastNowThread, self).__init__()
 
     def run(self):
         def post_update():
@@ -81,7 +82,7 @@ class DreamcastNowService(object):
         logger.info("MAC address: {}".format(self._mac_address))
 
     def reload_settings(self):
-        settings_file = os.expanduser("~/.dcnow.json")
+        settings_file = os.path.expanduser("~/.dcnow.json")
 
         if os.path.exists(settings_file):
             with open(settings_file, "r") as settings:
