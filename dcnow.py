@@ -8,6 +8,8 @@ import time
 import logging
 import urllib
 import urllib2
+import sh
+
 from hashlib import sha256
 
 from uuid import getnode as get_mac
@@ -28,12 +30,26 @@ class DreamcastNowThread(threading.Thread):
 
     def run(self):
         def post_update():
+            lines = [ x for x in sh.tail("/var/log/syslog", "-n", "10", _iter=True) ]
+            dns_query = None
+            for line in lines[::-1]:
+                if "CONNECT" in line and "dreampi" in line:
+                    # Don't seek back past connection
+                    break
+
+                if "query[A]" in line:
+                    # We did a DNS lookup, what was it?
+                    remainder = line[line.find("query[A]") + len("query[A]"):].strip()
+                    domain = remainder.split(" ", 1)[0].strip()
+                    dns_query = sha256(domain).hexdigest()
+                    break
+
             user_agent = 'Mozilla/4.0 (compatible; MSIE 5.5; Windows NT), Dreamcast Now'
             header = { 'User-Agent' : user_agent }
             mac_address = sha256(self._service._mac_address).hexdigest()
-            data = {
-
-            }
+            data = {}
+            if dns_query:
+                data["dns_query"] = dns_query
 
             data = urllib.urlencode(data)
             req = urllib2.Request(API_ROOT + UPDATE_END_POINT.format(mac_address=mac_address), data, header)
