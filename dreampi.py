@@ -13,6 +13,8 @@ import signal
 import re
 import struct
 
+from dcnow import DreamcastNowService
+
 from datetime import datetime, timedelta
 
 
@@ -23,7 +25,9 @@ def autoconfigure_ppp(device, speed):
     """
        Every network is different, this function runs on boot and tries
        to autoconfigure PPP as best it can by detecting the subnet and gateway
-       we're running on
+       we're running on.
+
+       Returns the IP allocated to the Dreamcast
     """
 
     gateway_ip = subprocess.check_output("route -n | grep 'UG[ \t]' | awk '{print $2}'", shell=True)
@@ -67,6 +71,8 @@ noccp
 
     with open("/etc/ppp/options", "w") as f:
         f.write(options_content)
+
+    return dreamcast_ip
 
 
 def detect_device_and_speed():
@@ -308,7 +314,7 @@ def process():
         subprocess.call(["sudo", "killall", "pppd"], stderr=devnull)
 
     modem = Modem(None, dial_tone_enabled)
-    autoconfigure_ppp(modem.device_name, modem.device_speed)
+    dreamcast_ip = autoconfigure_ppp(modem.device_name, modem.device_speed)
 
     mode = "LISTENING"
 
@@ -317,6 +323,8 @@ def process():
         modem.start_dial_tone()
 
     time_digit_heard = None
+
+    dcnow = DreamcastNowService()
 
     while True:
         now = datetime.now()
@@ -346,12 +354,16 @@ def process():
                 mode = "CONNECTED"
 
         elif mode == "CONNECTED":
+            dcnow.go_online(dreamcast_ip)
+
             # We start watching /var/log/messages for the hang up message
             for line in sh.tail("-f", "/var/log/messages", "-n", "1", _iter=True):
                 if "Modem hangup" in line:
                     logger.info("Detected modem hang up, going back to listening")
                     time.sleep(5) # Give the hangup some time
                     break
+
+            dcnow.go_offline()
 
             mode = "LISTENING"
             modem.disconnect()
