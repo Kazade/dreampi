@@ -3,9 +3,7 @@ import threading
 import cgi
 
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
-
-
-ENABLED_STATE = True
+from dcnow import CONFIGURATION_FILE, scan_mac_address
 
 
 class DreamPiConfigurationService(BaseHTTPRequestHandler):
@@ -28,14 +26,18 @@ class DreamPiConfigurationService(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
+        if os.path.exists(CONFIGURATION_FILE):
+            with open(CONFIGURATION_FILE, "r") as f:
+                enabled_state = json.loads(f.read())["enabled"]
+
         self.wfile.write(json.dumps({
-            "mac_address": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-            "is_enabled": ENABLED_STATE
+            "mac_address": scan_mac_address(),
+            "is_enabled": enabled_state
         }))
 
 
     def do_POST(self):
-        global ENABLED_STATE
+        enabled_state = True
 
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -44,13 +46,16 @@ class DreamPiConfigurationService(BaseHTTPRequestHandler):
 
         post_data = self._get_post_data()
         if 'disable' in post_data:
-            ENABLED_STATE = False
+            enabled_state = False
         else:
-            ENABLED_STATE = True
+            enabled_state = True
+
+        with open(CONFIGURATION_FILE, "w") as f:
+            f.write(json.dumps({"enabled": enabled_state}))
 
         self.wfile.write(json.dumps({
-            "mac_address": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-            "is_enabled": ENABLED_STATE
+            "mac_address": scan_mac_address(),
+            "is_enabled": enabled_state
         }))
 
 

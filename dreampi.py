@@ -11,7 +11,7 @@ import subprocess
 import sh
 import signal
 import re
-import struct
+import config_server
 
 from dcnow import DreamcastNowService
 
@@ -377,8 +377,10 @@ def process():
 
 def main():
     try:
+        config_server.start()
         return process()
     except:
+        config_server.stop()
         logger.exception("Something went wrong...")
         return 1
 

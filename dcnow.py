@@ -3,7 +3,6 @@
 import threading
 import os
 import json
-import subprocess
 import time
 import logging
 import urllib
@@ -21,6 +20,13 @@ UPDATE_END_POINT = "/api/update/{mac_address}/"
 
 UPDATE_INTERVAL = 30
 
+CONFIGURATION_FILE = os.path.expanduser("~/.dreampi.json")
+
+
+def scan_mac_address():
+    mac = get_mac()
+    return ':'.join(("%012X" % mac)[i:i+2] for i in range(0, 12, 2))
+
 
 class DreamcastNowThread(threading.Thread):
     def __init__(self, service):
@@ -30,6 +36,9 @@ class DreamcastNowThread(threading.Thread):
 
     def run(self):
         def post_update():
+            if not self._service.enabled:
+                return
+
             lines = [ x for x in sh.tail("/var/log/syslog", "-n", "10", _iter=True) ]
             dns_query = None
             for line in lines[::-1]:
@@ -71,7 +80,6 @@ class DreamcastNowService(object):
     def __init__(self):
         self._thread = None
         self._mac_address = None
-        self._username = None
         self._enabled = True
         self.reload_settings()
 
@@ -79,34 +87,17 @@ class DreamcastNowService(object):
         handler = logging.handlers.SysLogHandler(address='/dev/log')
         logger.addHandler(handler)
 
-    @property
-    def username(self):
-        if self._username:
-            return self._username
-
-        if self._mac_address:
-            return "Unnamed_{}".format(self._mac_address.replace(":", ""))
-
-        raise Exception("Either mac address or username must be set before accessing username")
-
-
     def update_mac_address(self, dreamcast_ip):
-        def scan_mac_address(ip):
-            mac = get_mac()
-            return ':'.join(("%012X" % mac)[i:i+2] for i in range(0, 12, 2))
-
-        self._mac_address = scan_mac_address(dreamcast_ip)
+        self._mac_address = scan_mac_address()
         logger.info("MAC address: {}".format(self._mac_address))
 
     def reload_settings(self):
-        settings_file = os.path.expanduser("~/.dcnow.json")
+        settings_file = CONFIGURATION_FILE
 
         if os.path.exists(settings_file):
             with open(settings_file, "r") as settings:
                 content = json.loads(settings.read())
-                self._username = content["username"]
                 self._enabled = content["enabled"]
-
 
     def go_online(self, dreamcast_ip):
         if not self._enabled:
