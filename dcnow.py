@@ -36,7 +36,7 @@ class DreamcastNowThread(threading.Thread):
 
     def run(self):
         def post_update():
-            if not self._service.enabled:
+            if not self._service._enabled:
                 return
 
             lines = [ x for x in sh.tail("/var/log/syslog", "-n", "10", _iter=True) ]
