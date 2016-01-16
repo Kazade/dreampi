@@ -1,6 +1,7 @@
 import json
 import threading
 import cgi
+import os
 
 from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
 from dcnow import CONFIGURATION_FILE, scan_mac_address
@@ -26,6 +27,7 @@ class DreamPiConfigurationService(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
 
+        enabled_state = True
         if os.path.exists(CONFIGURATION_FILE):
             with open(CONFIGURATION_FILE, "r") as f:
                 enabled_state = json.loads(f.read())["enabled"]

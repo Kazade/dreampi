@@ -25,7 +25,7 @@ CONFIGURATION_FILE = os.path.expanduser("~/.dreampi.json")
 
 def scan_mac_address():
     mac = get_mac()
-    return ':'.join(("%012X" % mac)[i:i+2] for i in range(0, 12, 2))
+    return sha256(':'.join(("%012X" % mac)[i:i+2] for i in range(0, 12, 2))).hexdigest()
 
 
 class DreamcastNowThread(threading.Thread):
@@ -55,7 +55,7 @@ class DreamcastNowThread(threading.Thread):
 
             user_agent = 'Mozilla/4.0 (compatible; MSIE 5.5; Windows NT), Dreamcast Now'
             header = { 'User-Agent' : user_agent }
-            mac_address = sha256(self._service._mac_address).hexdigest()
+            mac_address = self._service._mac_address
             data = {}
             if dns_query:
                 data["dns_query"] = dns_query
