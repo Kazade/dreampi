@@ -352,6 +352,7 @@ def process():
             if (now - time_digit_heard).total_seconds() > 8.0:
                 time_digit_heard = None
                 modem.answer()
+                modem.disconnect()
                 mode = "CONNECTED"
 
         elif mode == "CONNECTED":
@@ -367,7 +368,6 @@ def process():
             dcnow.go_offline()
 
             mode = "LISTENING"
-            modem.disconnect()
             modem = Modem(BAUD_SPEED, dial_tone_enabled)
             modem.connect()
             if dial_tone_enabled:
