@@ -93,8 +93,8 @@ def detect_device_and_speed():
         else:
             logger.info("No device detected")
 
-    except OSError:
-        logger.warning("Unable to detect modem. Falling back to ttyACM0")
+    except:
+        logger.exception("Unable to detect modem. Falling back to ttyACM0")
     return ("ttyACM0", 460800)
 
 
@@ -313,7 +313,8 @@ def process():
     with open(os.devnull, 'wb') as devnull:
         subprocess.call(["sudo", "killall", "pppd"], stderr=devnull)
 
-    modem = Modem(None, dial_tone_enabled)
+    BAUD_SPEED = 57600
+    modem = Modem(BAUD_SPEED, dial_tone_enabled)
     dreamcast_ip = autoconfigure_ppp(modem.device_name, modem.device_speed)
 
     mode = "LISTENING"
@@ -367,7 +368,7 @@ def process():
 
             mode = "LISTENING"
             modem.disconnect()
-            modem = Modem(None, dial_tone_enabled)
+            modem = Modem(BAUD_SPEED, dial_tone_enabled)
             modem.connect()
             if dial_tone_enabled:
                 modem.start_dial_tone()
