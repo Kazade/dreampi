@@ -74,5 +74,8 @@ def start():
 def stop():
     global server
     global thread
-    server.shutdown()
+
+    if server:
+        server.shutdown()
+
     thread.join()
