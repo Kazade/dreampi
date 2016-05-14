@@ -21,6 +21,56 @@ from datetime import datetime, timedelta
 logger = logging.getLogger('dreampi')
 
 
+def get_default_iface_name_linux():
+    route = "/proc/net/route"
+    with open(route) as f:
+        for line in f.readlines():
+            try:
+                iface, dest, _, flags, _, _, _, _, _, _, _, =  line.strip().split()
+                if dest != '00000000' or not int(flags, 16) & 2:
+                    continue
+                return iface
+            except:
+                continue
+
+
+def ip_exists(ip, iface):
+    command = [ "arping", "-c", "1", "-f", "-I", iface, ip ]
+
+    try:
+        output = subprocess.check_output(command)
+    except subprocess.CalledProcessError as e:
+        # Arping seems to always return 1 ?
+        if e.returncode != 1:
+            logging.exception("Error detecting ips")
+            return True #Assume the worst
+        else:
+            output = e.output
+
+    print output
+    try:
+        response_line = output.strip().split("\n")[-1]
+        response_count = int(response_line.split(" ")[1])
+        return response_count > 0
+    except (IndexError, TypeError, ValueError):
+        return True # Worst case
+
+
+def find_next_unused_ip(start):
+    interface = get_default_iface_name_linux()
+
+    parts = [int(x) for x in start.split(".")]
+    current_check = parts[-1] - 1
+
+    while current_check:
+        test_ip = ".".join([str(x) for x in parts[:3] + [current_check]])
+        if not ip_exists(test_ip, interface):
+            return test_ip
+        current_check -= 1
+
+    raise Exception("Unable to find a free IP on the network")
+
+
 def autoconfigure_ppp(device, speed):
     """
        Every network is different, this function runs on boot and tries
@@ -33,16 +83,6 @@ def autoconfigure_ppp(device, speed):
     gateway_ip = subprocess.check_output("route -n | grep 'UG[ \t]' | awk '{print $2}'", shell=True)
     subnet = gateway_ip.split(".")[:3]
 
-    def find_unused_ips():
-        try:
-            ARP_SCAN_COMMAND = [ "arp", "-n" ]
-            scan_results = subprocess.check_output(ARP_SCAN_COMMAND)
-            used_ips = set([int(x.split(" ")[0].split(".")[-1]) for x in scan_results.split("\n")[1:] if x.strip()])
-            free_ips = ("{}.{}.{}.{}".format(*(subnet + [x])) for x in range(99, 1, -1) if x not in used_ips)
-            return free_ips.next(), free_ips.next()
-        except:
-            logger.exception("Couldn't detect free IPs. Using .98 and .99")
-            return "{}.{}.{}.98".format(*subnet), "{}.{}.{}.99".format(*subnet)
 
     PEERS_TEMPLATE = """
 {device}
@@ -59,7 +99,9 @@ ktune
 noccp
     """.strip()
 
-    this_ip, dreamcast_ip = find_unused_ips()
+    this_ip = find_next_unused_ip(".".join(subnet) + ".100")
+    dreamcast_ip = find_next_unused_ip(this_ip)
+
     logger.info("Dreamcast IP: {}".format(dreamcast_ip))
 
     peers_content = PEERS_TEMPLATE.format(device=device, device_speed=speed, this_ip=this_ip, dc_ip=dreamcast_ip)
