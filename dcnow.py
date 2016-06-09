@@ -59,7 +59,6 @@ class DreamcastNowThread(threading.Thread):
             data = {}
             if dns_query:
                 data["dns_query"] = dns_query
-                logger.info(dns_query)
 
             data = urllib.urlencode(data)
             req = urllib2.Request(API_ROOT + UPDATE_END_POINT.format(mac_address=mac_address), data, header)
