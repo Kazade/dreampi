@@ -2,6 +2,7 @@
 
 import atexit
 import serial
+import socket
 import os
 import logging
 import logging.handlers
@@ -19,6 +20,22 @@ from datetime import datetime, timedelta
 
 
 logger = logging.getLogger('dreampi')
+
+
+def check_internet_connection():
+    """ Returns True if there's a connection """
+
+    host = "8.8.8.8"
+    port = 53
+    timeout = 3
+
+    try:
+        socket.setdefaulttimeout(timeout)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+        return True
+    except Exception:
+        logger.exception("No internet connection")
+        return False
 
 
 def get_default_iface_name_linux():
@@ -219,8 +236,8 @@ class Daemon(object):
 
 
 class Modem(object):
-    def __init__(self, comm_speed=None, send_dial_tone=True):
-        self._device, self._speed = detect_device_and_speed()
+    def __init__(self, device, speed, comm_speed=None, send_dial_tone=True):
+        self._device, self._speed = device, speed
         self._comm_speed = comm_speed or self._speed
         self._serial = None
         self._sending_tone = False
@@ -295,12 +312,12 @@ class Modem(object):
     def answer(self):
         self.reset()
         self.send_command("ATA")
-        time.sleep(2)
+        time.sleep(5)
         logger.info("Call answered!")
         logger.info(subprocess.check_output(["pon", "dreamcast"]))
         logger.info("Connected")
 
-    def send_command(self, command, timeout=30):
+    def send_command(self, command, timeout=60):
         VALID_RESPONSES = ("OK", "ERROR", "CONNECT", "VCON")
 
         final_command = "%s\r\n" % command
@@ -356,7 +373,28 @@ def process():
         subprocess.call(["sudo", "killall", "pppd"], stderr=devnull)
 
     BAUD_SPEED = 57600
-    modem = Modem(BAUD_SPEED, dial_tone_enabled)
+
+    device_and_speed, internet_connected = None, False
+
+    ## Startup checks, make sure that we don't do anything until
+    ## we have a modem and internet connection
+    while True:
+        logger.info("Detecting connection and modem...")
+        internet_connected = check_internet_connection()
+        device_and_speed = detect_device_and_speed()
+
+        if internet_connected and device_and_speed:
+            logger.info("Internet connected and device found!")
+            break
+
+        elif not internet_connected:
+            logger.warn("Unable to detect an internet connection. Waiting...")
+        elif not device_and_speed:
+            logger.warn("Unable to find a modem device. Waiting...")
+
+        time.sleep(5)
+
+    modem = Modem(device_and_speed[0], device_and_speed[1], BAUD_SPEED, dial_tone_enabled)
     dreamcast_ip = autoconfigure_ppp(modem.device_name, modem.device_speed)
 
     mode = "LISTENING"
