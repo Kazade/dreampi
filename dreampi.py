@@ -13,6 +13,7 @@ import sh
 import signal
 import re
 import config_server
+import urllib
 
 from dcnow import DreamcastNowService
 
@@ -36,6 +37,33 @@ def check_internet_connection():
     except Exception:
         logger.exception("No internet connection")
         return False
+
+
+afo_patcher = None
+
+def start_afo_patching():
+    global afo_patcher
+
+    def fetch_replacement_ip():
+        url = "http://dreamcast.online/afo.txt"
+        try:
+            return urllib.urlopen(url).read().strip()
+        except IOError:
+            return None
+
+
+    to_replace = "63.251.242.131"
+    replacement = fetch_replacement_ip()
+
+    if not replacement:
+        logger.warning("Not starting AFO patch as couldn't get IP from server")
+        return
+
+    afo_patcher = subprocess.Popen(["netsed", "tcp", "8080", "0", "0", 's/{}/{}'.format(to_replace, replacement)])
+
+def stop_afo_patching():
+    if afo_patcher:
+        afo_patcher.terminate()
 
 
 def get_default_iface_name_linux():
@@ -459,11 +487,14 @@ def process():
 def main():
     try:
         config_server.start()
+        start_afo_patching()
         return process()
     except:
-        config_server.stop()
         logger.exception("Something went wrong...")
         return 1
+    finally:
+        stop_afo_patching()
+        config_server.stop()
 
 
 if __name__ == '__main__':
