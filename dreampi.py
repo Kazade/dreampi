@@ -14,6 +14,7 @@ import signal
 import re
 import config_server
 import urllib
+import iptc
 
 from dcnow import DreamcastNowService
 
@@ -52,18 +53,32 @@ def start_afo_patching():
             return None
 
 
-    to_replace = "63.251.242.131"
     replacement = fetch_replacement_ip()
 
     if not replacement:
         logger.warning("Not starting AFO patch as couldn't get IP from server")
         return
 
-    afo_patcher = subprocess.Popen(["netsed", "tcp", "8080", "0", "0", 's/{}/{}'.format(to_replace, replacement)])
+    table = iptc.Table(iptc.Table.NAT)
+    chain = iptc.Chain(table, "PREROUTING")
+
+    rule = iptc.Rule()
+    rule.protocol = "tcp"
+    rule.dst = "63.251.242.131"
+    
+    target = iptc.Target(rule, "DNAT")
+    target.to_destination = replacement
+    rule.target = target
+    chain.insert_rule(rule)
+    
+    afo_patcher = rule
 
 def stop_afo_patching():
+    global afo_patcher
     if afo_patcher:
-        afo_patcher.terminate()
+        table = iptc.Table(iptc.Table.NAT)
+        chain = iptc.Chain(table, "PREROUTING")
+        chain.delete_rule(afo_patcher)
 
 
 def get_default_iface_name_linux():
@@ -476,7 +491,7 @@ def process():
             dcnow.go_offline()
 
             mode = "LISTENING"
-            modem = Modem(BAUD_SPEED, dial_tone_enabled)
+            modem = Modem(device_and_speed[0], device_and_speed[1], BAUD_SPEED, dial_tone_enabled)
             modem.connect()
             if dial_tone_enabled:
                 modem.start_dial_tone()
