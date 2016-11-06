@@ -65,13 +65,13 @@ def start_afo_patching():
     rule = iptc.Rule()
     rule.protocol = "tcp"
     rule.dst = "63.251.242.131"
+    rule.create_target("DNAT")
+    rule.target.to_destination = replacement
     
-    target = iptc.Target(rule, "DNAT")
-    target.to_destination = replacement
-    rule.target = target
-    chain.insert_rule(rule)
+    chain.append_rule(rule)
     
     afo_patcher = rule
+    logger.info("AFO routing enabled")
 
 def stop_afo_patching():
     global afo_patcher
@@ -79,6 +79,7 @@ def stop_afo_patching():
         table = iptc.Table(iptc.Table.NAT)
         chain = iptc.Chain(table, "PREROUTING")
         chain.delete_rule(afo_patcher)
+        logger.info("AFO routing disabled")
 
 
 def get_default_iface_name_linux():
@@ -407,8 +408,18 @@ class Modem(object):
                 self._time_since_last_dial_tone = now
 
 
+class GracefulKiller(object):
+    def __init__(self):
+        self.kill_now = False
+        signal.signal(signal.SIGINT, self.exit_gracefully)
+        signal.signal(signal.SIGTERM, self.exit_gracefully)
+
+    def exit_gracefully(self,signum, frame):
+        self.kill_now = True
 
 def process():
+    killer = GracefulKiller()
+
     dial_tone_enabled = not "--disable-dial-tone" in sys.argv
 
     # Make sure pppd isn't running
@@ -451,6 +462,9 @@ def process():
     dcnow = DreamcastNowService()
 
     while True:
+        if killer.kill_now:
+            break
+    
         now = datetime.now()
 
         if mode == "LISTENING":
@@ -510,6 +524,7 @@ def main():
     finally:
         stop_afo_patching()
         config_server.stop()
+        logger.info("Dreampi quit successfully")
 
 
 if __name__ == '__main__':
