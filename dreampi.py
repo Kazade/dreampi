@@ -82,22 +82,23 @@ def stop_afo_patching():
         logger.info("AFO routing disabled")
 
 
-
-def start_dcvoip_process():
+def start_process(name):
     try:
-        logger.info("Starting dcvoip process - Thanks Jonas Karlsson!")
+        logger.info("Starting {} process - Thanks Jonas Karlsson!".format(name))
         with open(os.devnull, 'wb') as devnull:    
-            subprocess.check_call(["sudo", "service", "dcvoip", "start"], stdout=devnull)    
+            subprocess.check_call(["sudo", "service", name, "start"], stdout=devnull)    
     except (subprocess.CalledProcessError, IOError):
-        logging.warning("Unable to start the dcvoip process")
-        
-def stop_dcvoip_process():
+        logging.warning("Unable to start the {} process".format(name))
+
+
+def stop_process(name):
     try:
-        logger.info("Stopping dcvoip process")
+        logger.info("Stopping {} process".format(name))
         with open(os.devnull, 'wb') as devnull:
-            subprocess.check_call(["sudo", "service", "dcvoip", "stop"], stdout=devnull)
+            subprocess.check_call(["sudo", "service", name, "stop"], stdout=devnull)
     except (subprocess.CalledProcessError, IOError):
-        logging.warning("Unable to stop the dcvoip process")    
+        logging.warning("Unable to stop the {} process".format(name))    
+
 
 def get_default_iface_name_linux():
     route = "/proc/net/route"
@@ -443,7 +444,7 @@ def process():
     with open(os.devnull, 'wb') as devnull:
         subprocess.call(["sudo", "killall", "pppd"], stderr=devnull)
 
-    BAUD_SPEED = 57600
+    BAUD_SPEED = 56000
 
     device_and_speed, internet_connected = None, False
 
@@ -532,15 +533,22 @@ def process():
 
 def main():
     try:
+        # Don't do anything until there is an internet connection
+        while not check_internet_connection():
+            logger.info("Waiting for internet connection...")
+            time.sleep(3)
+
         config_server.start()
         start_afo_patching()
-        start_dcvoip_process()
+        start_process("dcvoip")
+        start_process("dcgamespy")
         return process()
     except:
         logger.exception("Something went wrong...")
         return 1
     finally:
-        stop_dcvoip_process()
+        stop_process("dcgamespy")
+        stop_process("dcvoip")        
         stop_afo_patching()
         
         config_server.stop()
