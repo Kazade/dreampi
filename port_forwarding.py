@@ -64,7 +64,10 @@ class PortForwarding:
             error, we keep trucking.
         """
 
-        if self._upnp.selectigd() is None:
+        try:
+            self._upnp.detect()
+            self._upnp.selectigd()
+        except Exception as e:
             logger.info("Could not find a UPnP internet gateway device on your network. Not automatically forwarding ports.")
             return False
 
