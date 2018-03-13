@@ -65,7 +65,7 @@ class PortForwarding:
         """
 
         try:
-            self._upnp.detect()
+            self._upnp.discover()
             self._upnp.selectigd()
         except Exception as e:
             self._logger.info("Could not find a UPnP internet gateway device on your network. Not automatically forwarding ports.")
