@@ -17,6 +17,7 @@ import urllib
 import iptc
 
 from dcnow import DreamcastNowService
+from port_forwarding import PortForwarding
 
 from datetime import datetime, timedelta
 
@@ -67,9 +68,9 @@ def start_afo_patching():
     rule.dst = "63.251.242.131"
     rule.create_target("DNAT")
     rule.target.to_destination = replacement
-    
+
     chain.append_rule(rule)
-    
+
     afo_patcher = rule
     logger.info("AFO routing enabled")
 
@@ -85,8 +86,8 @@ def stop_afo_patching():
 def start_process(name):
     try:
         logger.info("Starting {} process - Thanks Jonas Karlsson!".format(name))
-        with open(os.devnull, 'wb') as devnull:    
-            subprocess.check_call(["sudo", "service", name, "start"], stdout=devnull)    
+        with open(os.devnull, 'wb') as devnull:
+            subprocess.check_call(["sudo", "service", name, "start"], stdout=devnull)
     except (subprocess.CalledProcessError, IOError):
         logging.warning("Unable to start the {} process".format(name))
 
@@ -97,7 +98,7 @@ def stop_process(name):
         with open(os.devnull, 'wb') as devnull:
             subprocess.check_call(["sudo", "service", name, "stop"], stdout=devnull)
     except (subprocess.CalledProcessError, IOError):
-        logging.warning("Unable to stop the {} process".format(name))    
+        logging.warning("Unable to stop the {} process".format(name))
 
 
 def get_default_iface_name_linux():
@@ -469,6 +470,9 @@ def process():
     modem = Modem(device_and_speed[0], device_and_speed[1], BAUD_SPEED, dial_tone_enabled)
     dreamcast_ip = autoconfigure_ppp(modem.device_name, modem.device_speed)
 
+    # Get a port forwarding object, now that we know the DC IP.
+    port_forwarding = PortForwarding(dreamcast_ip, logger)
+
     mode = "LISTENING"
 
     modem.connect()
@@ -482,7 +486,7 @@ def process():
     while True:
         if killer.kill_now:
             break
-    
+
         now = datetime.now()
 
         if mode == "LISTENING":
@@ -512,6 +516,7 @@ def process():
 
         elif mode == "CONNECTED":
             dcnow.go_online(dreamcast_ip)
+            port_forwarding.forward_all()
 
             # We start watching /var/log/messages for the hang up message
             for line in sh.tail("-f", "/var/log/messages", "-n", "1", _iter=True):
@@ -520,6 +525,7 @@ def process():
                     time.sleep(5) # Give the hangup some time
                     break
 
+            port_forwarding.delete_all()
             dcnow.go_offline()
 
             mode = "LISTENING"
@@ -548,9 +554,9 @@ def main():
         return 1
     finally:
         stop_process("dcgamespy")
-        stop_process("dcvoip")        
+        stop_process("dcvoip")
         stop_afo_patching()
-        
+
         config_server.stop()
         logger.info("Dreampi quit successfully")
 
