@@ -480,7 +480,7 @@ def process():
     while True:
         logger.info("Detecting connection and modem...")
         internet_connected = check_internet_connection()
-        device_and_speed = detect_device_and_speed()
+        device_and_speed = list(detect_device_and_speed())
 
         if internet_connected and device_and_speed:
             logger.info("Internet connected and device found!")
