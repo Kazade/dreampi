@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=dreampi start
-ExecStop=dreampi stop
+ExecStart=/usr/local/bin/dreampi start
+ExecStop=/usr/local/bin/dreampi stop
 Restart=on-failure 
 
 [Install]
