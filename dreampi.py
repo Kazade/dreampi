@@ -116,25 +116,14 @@ def get_default_iface_name_linux():
 
 
 def ip_exists(ip, iface):
-    command = ["arping", "-c", "1", "-f", "-I", iface, ip]
+    command = ["arping", "-c", "2", "-D", "-q", "-I", iface, ip]
 
-    try:
-        output = subprocess.check_output(command)
-    except subprocess.CalledProcessError as e:
-        # Arping seems to always return 1 ?
-        if e.returncode != 1:
-            logging.exception("Error detecting ips")
-            return True  # Assume the worst
-        else:
-            output = e.output
-
-    print output
-    try:
-        response_line = output.strip().split("\n")[-1]
-        response_count = int(response_line.split(" ")[1])
-        return response_count > 0
-    except (IndexError, TypeError, ValueError):
-        return True  # Worst case
+    if subprocess.call(command) == 1:
+        logger.info("IP existed at %s", ip)
+        return True
+    else:
+        logger.info("Free IP at %s", ip)
+        return False
 
 
 def find_next_unused_ip(start):
