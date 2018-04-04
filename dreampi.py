@@ -212,6 +212,8 @@ noccp
 
 
 def detect_device_and_speed():
+    MAX_SPEED = 57600
+
     command = ["wvdialconf", "/dev/null"]
 
     try:
@@ -225,13 +227,16 @@ def detect_device_and_speed():
                 device = match.group(1)
                 speed = match.group(2)
                 logger.info("Detected device {} with speed {}".format(device, speed))
-                return device, speed
+
+                # Many modems report speeds higher than they can handle so we cap
+                # to 56k
+                return device, min(speed, MAX_SPEED)
         else:
             logger.info("No device detected")
 
     except:
         logger.exception("Unable to detect modem. Falling back to ttyACM0")
-    return ("ttyACM0", 460800)
+    return ("ttyACM0", MAX_SPEED)
 
 
 class Daemon(object):
@@ -480,7 +485,7 @@ def process():
     while True:
         logger.info("Detecting connection and modem...")
         internet_connected = check_internet_connection()
-        device_and_speed = list(detect_device_and_speed())
+        device_and_speed = detect_device_and_speed()
 
         if internet_connected and device_and_speed:
             logger.info("Internet connected and device found!")
@@ -492,9 +497,6 @@ def process():
             logger.warn("Unable to find a modem device. Waiting...")
 
         time.sleep(5)
-
-    # Temporary hack
-    device_and_speed[1] = 38400
 
     modem = Modem(device_and_speed[0], device_and_speed[1], dial_tone_enabled)
     dreamcast_ip = autoconfigure_ppp(modem.device_name, modem.device_speed)
