@@ -498,7 +498,10 @@ def process():
 
     # Get a port forwarding object, now that we know the DC IP.
     port_forwarding = PortForwarding(dreamcast_ip, logger)
-    port_forwarding.forward_all()
+    
+    # Disabled until we can figure out a faster way of doing this.. it takes a minute 
+    # on my router which is way too long to wait for the DreamPi to boot
+    # port_forwarding.forward_all()
 
     mode = "LISTENING"
 
@@ -559,7 +562,8 @@ def process():
             if dial_tone_enabled:
                 modem.start_dial_tone()
 
-    port_forwarding.delete_all()
+    # Temporarily disabled, see above
+    # port_forwarding.delete_all()
     return 0
 
 
