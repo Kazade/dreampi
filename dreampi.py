@@ -116,9 +116,9 @@ def get_default_iface_name_linux():
 
 
 def ip_exists(ip, iface):
-    command = ["arping", "-c", "2", "-D", "-q", "-I", iface, ip]
-
-    if subprocess.call(command) == 1:
+    command = ["arp", "-a"]
+    output = subprocess.check_output(command)
+    if ("(%s)" % ip) in output:
         logger.info("IP existed at %s", ip)
         return True
     else:
