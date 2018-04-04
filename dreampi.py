@@ -299,9 +299,8 @@ class Daemon(object):
 
 
 class Modem(object):
-    def __init__(self, device, speed, comm_speed=None, send_dial_tone=True):
+    def __init__(self, device, speed, send_dial_tone=True):
         self._device, self._speed = device, speed
-        self._comm_speed = comm_speed or self._speed
         self._serial = None
         self._sending_tone = False
 
@@ -337,7 +336,7 @@ class Modem(object):
 
         logger.info("Opening serial interface to {}".format(self._device))
         self._serial = serial.Serial(
-            "/dev/{}".format(self._device), self._comm_speed, timeout=0
+            "/dev/{}".format(self._device), self._speed, timeout=0
         )
 
     def disconnect(self):
@@ -361,7 +360,7 @@ class Modem(object):
         self.send_command("AT+VTX")  # Voice transmission mode
 
         self._sending_tone = True
-        
+       
         self._time_since_last_dial_tone = (
             datetime.now() - timedelta(seconds=100)
         )
@@ -459,8 +458,6 @@ def process():
     with open(os.devnull, 'wb') as devnull:
         subprocess.call(["sudo", "killall", "pppd"], stderr=devnull)
 
-    BAUD_SPEED = 56000
-
     device_and_speed, internet_connected = None, False
 
     # Startup checks, make sure that we don't do anything until
@@ -481,7 +478,7 @@ def process():
 
         time.sleep(5)
 
-    modem = Modem(device_and_speed[0], device_and_speed[1], BAUD_SPEED, dial_tone_enabled)
+    modem = Modem(device_and_speed[0], device_and_speed[1], dial_tone_enabled)
     dreamcast_ip = autoconfigure_ppp(modem.device_name, modem.device_speed)
 
     # Get a port forwarding object, now that we know the DC IP.
@@ -543,7 +540,7 @@ def process():
             dcnow.go_offline()
 
             mode = "LISTENING"
-            modem = Modem(device_and_speed[0], device_and_speed[1], BAUD_SPEED, dial_tone_enabled)
+            modem = Modem(device_and_speed[0], device_and_speed[1], dial_tone_enabled)
             modem.connect()
             if dial_tone_enabled:
                 modem.start_dial_tone()
