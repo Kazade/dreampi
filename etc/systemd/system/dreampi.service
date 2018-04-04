@@ -4,9 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/dreampi start
-ExecStop=/usr/local/bin/dreampi stop
-Restart=on-failure 
+ExecStart=/usr/local/bin/dreampi --no-daemon
 
 [Install]
 WantedBy=multi-user.target

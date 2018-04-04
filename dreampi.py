@@ -14,12 +14,16 @@ import signal
 import re
 import config_server
 import urllib
+import urllib2
 import iptc
 
 from dcnow import DreamcastNowService
 from port_forwarding import PortForwarding
 
 from datetime import datetime, timedelta
+
+
+DNS_FILE = "https://dreamcast.online/dreampi/dreampi_dns.conf"
 
 
 logger = logging.getLogger('dreampi')
@@ -39,6 +43,27 @@ def check_internet_connection():
     except Exception:
         logger.exception("No internet connection")
         return False
+
+
+def update_dns_file():
+    """
+        Download a DNS settings file for the DreamPi configuration (avoids forwarding requests to the main DNS server
+        and provides a backup if that ever goes down)
+    """
+    try:
+        response = urllib2.urlopen(DNS_FILE)
+        # Stop the server
+        subprocess.check_call("sudo service dnsmasq stop".split())
+
+        # Update the configuration
+        with open("/etc/dnsmasq.d/dreampi.conf", "w") as f:
+            f.write(response.read())
+
+        # Start the server again
+        subprocess.check_call("sudo service dnsmasq start".split())
+    except (urllib2.URLError, IOError):
+        logging.exception("Unable to update the DNS file for some reason, will use upstream")
+        pass
 
 
 afo_patcher = None
@@ -435,6 +460,7 @@ class GracefulKiller(object):
         signal.signal(signal.SIGTERM, self.exit_gracefully)
 
     def exit_gracefully(self, signum, frame):
+        logging.warning("Received signal: %s", signum)
         self.kill_now = True
 
 
@@ -543,6 +569,9 @@ def main():
         while not check_internet_connection():
             logger.info("Waiting for internet connection...")
             time.sleep(3)
+
+        # Try to update the DNS configuration
+        update_dns_file()
 
         config_server.start()
         start_afo_patching()
