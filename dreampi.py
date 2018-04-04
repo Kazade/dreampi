@@ -498,6 +498,7 @@ def process():
 
     # Get a port forwarding object, now that we know the DC IP.
     port_forwarding = PortForwarding(dreamcast_ip, logger)
+    port_forwarding.forward_all()
 
     mode = "LISTENING"
 
@@ -542,7 +543,6 @@ def process():
 
         elif mode == "CONNECTED":
             dcnow.go_online(dreamcast_ip)
-            port_forwarding.forward_all()
 
             # We start watching /var/log/messages for the hang up message
             for line in sh.tail("-f", "/var/log/messages", "-n", "1", _iter=True):
@@ -551,7 +551,6 @@ def process():
                     time.sleep(5)  # Give the hangup some time
                     break
 
-            port_forwarding.delete_all()
             dcnow.go_offline()
 
             mode = "LISTENING"
@@ -560,6 +559,7 @@ def process():
             if dial_tone_enabled:
                 modem.start_dial_tone()
 
+    port_forwarding.delete_all()
     return 0
 
 
