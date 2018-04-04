@@ -380,14 +380,21 @@ class Modem(object):
 
     def answer(self):
         self.reset()
-        self.send_command("ATA")
+        # When we send ATA we only want to look for CONNECT. Some modems respond OK then CONNECT
+        # and that messes everything up
+        self.send_command("ATA", ignore_responses=["OK"])
         time.sleep(5)
         logger.info("Call answered!")
         logger.info(subprocess.check_output(["pon", "dreamcast"]))
         logger.info("Connected")
 
-    def send_command(self, command, timeout=60):
-        VALID_RESPONSES = ("OK", "ERROR", "CONNECT", "VCON")
+    def send_command(self, command, timeout=60, ignore_responses=None):
+        ignore_responses = ignore_responses or []  # Things to completely ignore
+
+        VALID_RESPONSES = ["OK", "ERROR", "CONNECT", "VCON"]
+
+        for ignore in ignore_responses:
+            VALID_RESPONSES.remove(ignore)
 
         final_command = "%s\r\n" % command
         self._serial.write(final_command)
