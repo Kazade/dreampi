@@ -43,6 +43,7 @@ def check_internet_connection():
 
 afo_patcher = None
 
+
 def start_afo_patching():
     global afo_patcher
 
@@ -52,7 +53,6 @@ def start_afo_patching():
             return urllib.urlopen(url).read().strip()
         except IOError:
             return None
-
 
     replacement = fetch_replacement_ip()
 
@@ -73,6 +73,7 @@ def start_afo_patching():
 
     afo_patcher = rule
     logger.info("AFO routing enabled")
+
 
 def stop_afo_patching():
     global afo_patcher
@@ -115,7 +116,7 @@ def get_default_iface_name_linux():
 
 
 def ip_exists(ip, iface):
-    command = [ "arping", "-c", "1", "-f", "-I", iface, ip ]
+    command = ["arping", "-c", "1", "-f", "-I", iface, ip]
 
     try:
         output = subprocess.check_output(command)
@@ -123,7 +124,7 @@ def ip_exists(ip, iface):
         # Arping seems to always return 1 ?
         if e.returncode != 1:
             logging.exception("Error detecting ips")
-            return True #Assume the worst
+            return True  # Assume the worst
         else:
             output = e.output
 
@@ -133,7 +134,7 @@ def ip_exists(ip, iface):
         response_count = int(response_line.split(" ")[1])
         return response_count > 0
     except (IndexError, TypeError, ValueError):
-        return True # Worst case
+        return True  # Worst case
 
 
 def find_next_unused_ip(start):
@@ -162,7 +163,6 @@ def autoconfigure_ppp(device, speed):
 
     gateway_ip = subprocess.check_output("route -n | grep 'UG[ \t]' | awk '{print $2}'", shell=True)
     subnet = gateway_ip.split(".")[:3]
-
 
     PEERS_TEMPLATE = """
 {device}
@@ -198,7 +198,7 @@ noccp
 
 
 def detect_device_and_speed():
-    command = [ "wvdialconf", "/dev/null" ]
+    command = ["wvdialconf", "/dev/null"]
 
     try:
         output = subprocess.check_output(command, stderr=subprocess.STDOUT)
@@ -231,7 +231,7 @@ class Daemon(object):
             if pid > 0:
                 sys.exit(0)
 
-        except OSError, e:
+        except OSError:
             sys.exit(1)
 
         os.chdir("/")
@@ -242,7 +242,7 @@ class Daemon(object):
             pid = os.fork()
             if pid > 0:
                 sys.exit(0)
-        except OSError, e:
+        except OSError:
             sys.exit(1)
 
         atexit.register(self.delete_pid)
@@ -284,7 +284,7 @@ class Daemon(object):
                 os.kill(pid, signal.SIGTERM)
                 time.sleep(0.1)
 
-        except OSError as err:
+        except OSError:
             if os.path.exists(self.pidfile):
                 os.remove(self.pidfile)
             else:
@@ -326,8 +326,8 @@ class Modem(object):
         dial_tone_wav = os.path.join(this_dir, "dial-tone.wav")
 
         with open(dial_tone_wav, "rb") as f:
-            dial_tone = f.read() # Read the entire wav file
-            dial_tone = dial_tone[44:] # Strip the header (44 bytes)
+            dial_tone = f.read()  # Read the entire wav file
+            dial_tone = dial_tone[44:]  # Strip the header (44 bytes)
 
         return dial_tone
 
@@ -336,7 +336,9 @@ class Modem(object):
             self.disconnect()
 
         logger.info("Opening serial interface to {}".format(self._device))
-        self._serial = serial.Serial("/dev/{}".format(self._device), self._comm_speed, timeout=0)
+        self._serial = serial.Serial(
+            "/dev/{}".format(self._device), self._comm_speed, timeout=0
+        )
 
     def disconnect(self):
         if self._serial and self._serial.isOpen():
@@ -345,21 +347,25 @@ class Modem(object):
             logger.info("Serial interface terminated")
 
     def reset(self):
-        self.send_command("ATZ0") # Send reset command
-        self.send_command("ATE0") # Don't echo our responses
+        self.send_command("ATZ0")  # Send reset command
+        self.send_command("ATE0")  # Don't echo our responses
 
     def start_dial_tone(self):
         if not self._dial_tone_wav:
             return
 
         self.reset()
-        self.send_command("AT+FCLASS=8") # Enter voice mode
-        self.send_command("AT+VLS=1") # Go off-hook
-        self.send_command("AT+VSM=1,8000") # 8 bit unsigned PCM
-        self.send_command("AT+VTX") # Voice transmission mode
+        self.send_command("AT+FCLASS=8")  # Enter voice mode
+        self.send_command("AT+VLS=1")  # Go off-hook
+        self.send_command("AT+VSM=1,8000")  # 8 bit unsigned PCM
+        self.send_command("AT+VTX")  # Voice transmission mode
 
         self._sending_tone = True
-        self._time_since_last_dial_tone = datetime.now() - timedelta(seconds=100)
+        
+        self._time_since_last_dial_tone = (
+            datetime.now() - timedelta(seconds=100)
+        )
+
         self._dial_tone_counter = 0
 
     def stop_dial_tone(self):
@@ -368,8 +374,8 @@ class Modem(object):
 
         self._serial.write("\0{}{}\r\n".format(chr(0x10), chr(0x03)))
         self.send_escape()
-        self.send_command("ATH0") # Go on-hook
-        self.reset() #Reset the modem
+        self.send_command("ATH0")  # Go on-hook
+        self.reset()  # Reset the modem
         self._sending_tone = False
 
     def answer(self):
@@ -400,7 +406,7 @@ class Modem(object):
             for resp in VALID_RESPONSES:
                 if resp in line:
                     logger.info(line[line.find(resp):])
-                    return # We are done
+                    return  # We are done
 
             if (datetime.now() - start).total_seconds() > timeout:
                 raise IOError("There was a timeout while waiting for a response from the modem")
@@ -433,13 +439,14 @@ class GracefulKiller(object):
         signal.signal(signal.SIGINT, self.exit_gracefully)
         signal.signal(signal.SIGTERM, self.exit_gracefully)
 
-    def exit_gracefully(self,signum, frame):
+    def exit_gracefully(self, signum, frame):
         self.kill_now = True
+
 
 def process():
     killer = GracefulKiller()
 
-    dial_tone_enabled = not "--disable-dial-tone" in sys.argv
+    dial_tone_enabled = "--disable-dial-tone" not in sys.argv
 
     # Make sure pppd isn't running
     with open(os.devnull, 'wb') as devnull:
@@ -449,8 +456,8 @@ def process():
 
     device_and_speed, internet_connected = None, False
 
-    ## Startup checks, make sure that we don't do anything until
-    ## we have a modem and internet connection
+    # Startup checks, make sure that we don't do anything until
+    # we have a modem and internet connection
     while True:
         logger.info("Detecting connection and modem...")
         internet_connected = check_internet_connection()
@@ -496,7 +503,7 @@ def process():
                 continue
 
             if ord(char) == 16:
-                #DLE character
+                # DLE character
                 try:
                     char = modem._serial.read(1)
                     digit = int(char)
@@ -522,7 +529,7 @@ def process():
             for line in sh.tail("-f", "/var/log/messages", "-n", "1", _iter=True):
                 if "Modem hangup" in line:
                     logger.info("Detected modem hang up, going back to listening")
-                    time.sleep(5) # Give the hangup some time
+                    time.sleep(5)  # Give the hangup some time
                     break
 
             port_forwarding.delete_all()
