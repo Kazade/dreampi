@@ -493,6 +493,9 @@ def process():
 
         time.sleep(5)
 
+    # Temporary hack
+    device_and_speed[1] = 38400
+
     modem = Modem(device_and_speed[0], device_and_speed[1], dial_tone_enabled)
     dreamcast_ip = autoconfigure_ppp(modem.device_name, modem.device_speed)
 
