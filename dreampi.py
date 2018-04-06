@@ -32,15 +32,26 @@ logger = logging.getLogger('dreampi')
 def check_internet_connection():
     """ Returns True if there's a connection """
 
-    host = "8.8.8.8"
+    IP_ADDRESS_LIST = [
+        "1.1.1.1",  # Cloudflare
+        "1.0.0.1", 
+        "8.8.8.8",  # Google DNS
+        "8.8.4.4",
+        "208.67.222.222",  # Open DNS
+        "208.67.220.220"
+    ]
+
     port = 53
     timeout = 3
 
-    try:
-        socket.setdefaulttimeout(timeout)
-        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
-        return True
-    except Exception:
+    for host in IP_ADDRESS_LIST:
+        try:
+            socket.setdefaulttimeout(timeout)
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+            return True
+        except socket.error:
+            pass
+    else:
         logger.exception("No internet connection")
         return False
 
