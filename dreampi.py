@@ -76,7 +76,7 @@ def update_dns_file():
 
         # Start the server again
         subprocess.check_call("sudo service dnsmasq start".split())
-    except (urllib2.URLError, IOError):
+    except (urllib2.URLError, urllib2.HTTPError, IOError):
         logging.exception("Unable to update the DNS file for some reason, will use upstream")
         pass
 
