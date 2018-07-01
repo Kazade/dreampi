@@ -56,6 +56,10 @@ def check_internet_connection():
         return False
 
 
+def restart_dnsmasq():
+    subprocess.call("sudo service dnsmasq restart".split())
+
+
 def update_dns_file():
     """
         Download a DNS settings file for the DreamPi configuration (avoids forwarding requests to the main DNS server
@@ -513,7 +517,7 @@ def process():
     dreamcast_ip = autoconfigure_ppp(modem.device_name, modem.device_speed)
 
     # Get a port forwarding object, now that we know the DC IP.
-    port_forwarding = PortForwarding(dreamcast_ip, logger)
+    # port_forwarding = PortForwarding(dreamcast_ip, logger)
     
     # Disabled until we can figure out a faster way of doing this.. it takes a minute 
     # on my router which is way too long to wait for the DreamPi to boot
@@ -583,6 +587,22 @@ def process():
     return 0
 
 
+def enable_prom_mode_on_wlan0():
+    """
+        The Pi wifi firmware seems broken, we can only get it to work by enabling
+        promiscuous mode.
+
+        This is a hack, we just enable it for wlan0 and ignore errors
+    """
+
+    try:
+        subprocess.check_call("sudo ifconfig wlan0 promisc".split())
+        logging.info("Promiscuous mode set on wlan0")
+    except subprocess.CalledProcessError:
+        logging.info("Attempted to set promiscuous mode on wlan0 but was unsuccessful")
+        logging.info("Probably no wifi connected, or using a different device name")
+
+
 def main():
     try:
         # Don't do anything until there is an internet connection
@@ -592,6 +612,12 @@ def main():
 
         # Try to update the DNS configuration
         update_dns_file()
+
+        # Hack around dodgy Raspberry Pi things
+        enable_prom_mode_on_wlan0()
+
+        # Just make sure everything is fine
+        restart_dnsmasq()
 
         config_server.start()
         start_afo_patching()
