@@ -623,11 +623,13 @@ def main():
         start_afo_patching()
         start_process("dcvoip")
         start_process("dcgamespy")
+        start_process("dc2k2")
         return process()
     except:
         logger.exception("Something went wrong...")
         return 1
     finally:
+        stop_process("dc2k2")
         stop_process("dcgamespy")
         stop_process("dcvoip")
         stop_afo_patching()
