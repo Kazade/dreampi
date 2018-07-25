@@ -34,7 +34,7 @@ def check_internet_connection():
 
     IP_ADDRESS_LIST = [
         "1.1.1.1",  # Cloudflare
-        "1.0.0.1", 
+        "1.0.0.1",
         "8.8.8.8",  # Google DNS
         "8.8.4.4",
         "208.67.222.222",  # Open DNS
@@ -226,8 +226,17 @@ noccp
     return dreamcast_ip
 
 
+ENABLE_SPEED_DETECTION = False  # Set this to true if you want to use wvdialconf for device detection
+
+
 def detect_device_and_speed():
     MAX_SPEED = 57600
+
+    if not ENABLE_SPEED_DETECTION:
+        # By default we don't detect the speed or device as it's flakey in later
+        # Pi kernels. But it might be necessary for some people so that functionality
+        # can be enabled by setting the flag above to True
+        return ("ttyACM0", MAX_SPEED)
 
     command = ["wvdialconf", "/dev/null"]
 
@@ -394,7 +403,7 @@ class Modem(object):
         self.send_command("AT+VTX")  # Voice transmission mode
 
         self._sending_tone = True
-       
+
         self._time_since_last_dial_tone = (
             datetime.now() - timedelta(seconds=100)
         )
@@ -518,8 +527,8 @@ def process():
 
     # Get a port forwarding object, now that we know the DC IP.
     # port_forwarding = PortForwarding(dreamcast_ip, logger)
-    
-    # Disabled until we can figure out a faster way of doing this.. it takes a minute 
+
+    # Disabled until we can figure out a faster way of doing this.. it takes a minute
     # on my router which is way too long to wait for the DreamPi to boot
     # port_forwarding.forward_all()
 
