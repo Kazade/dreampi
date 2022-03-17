@@ -45,8 +45,10 @@ class DreamcastNowThread(threading.Thread):
                 return
 
             lines: List[str] = list(
-                sh.tail("/var/log/syslog", "-n", "10", _iter=True)
-            )  # type: ignore - sh has dynamic members
+                sh.tail(  # type: ignore - sh has dynamic members
+                    "/var/log/syslog", "-n", "10", _iter=True
+                )
+            )
             dns_query = None
             for line in lines[::-1]:
                 line: str = line

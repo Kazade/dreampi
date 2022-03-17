@@ -607,9 +607,9 @@ def process():
             dcnow.go_online()
 
             # We start watching /var/log/messages for the hang up message
-            for line in sh.tail(
+            for line in sh.tail(  # type: ignore - sh module is dynamic
                 "-f", "/var/log/messages", "-n", "1", _iter=True
-            ):  # type: ignore - sh module is dynamic
+            ):
                 line: str = line
                 if "Modem hangup" in line:
                     logger.info("Detected modem hang up, going back to listening")
