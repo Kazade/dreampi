@@ -30,7 +30,7 @@ from datetime import datetime, timedelta
 DNS_FILE = "https://dreamcast.online/dreampi/dreampi_dns.conf"
 
 
-logger = logging.getLogger('dreampi')
+logger = logging.getLogger("dreampi")
 
 
 def check_internet_connection():
@@ -42,7 +42,7 @@ def check_internet_connection():
         "8.8.8.8",  # Google DNS
         "8.8.4.4",
         "208.67.222.222",  # Open DNS
-        "208.67.220.220"
+        "208.67.220.220",
     ]
 
     port = 53
@@ -73,12 +73,14 @@ def update_dns_file():
     try:
         response = urllib.request.urlopen(DNS_FILE)
     except urllib.error.HTTPError as e:
-        logging.info(f"Did not find remote DNS config (HTTP code {e.code}); will use upstream")
+        logging.info(
+            f"Did not find remote DNS config (HTTP code {e.code}); will use upstream"
+        )
         return
     except urllib.error.URLError as e:
         logging.exception("Failed to check for remote DNS config")
         return
-    
+
     # Stop the server
     subprocess.check_call("sudo service dnsmasq stop".split())
 
@@ -88,7 +90,7 @@ def update_dns_file():
             f.write(response.read())
     except IOError:
         logging.exception("Found remote DNS config but failed to apply it locally")
-    
+
     # Start the server again
     subprocess.check_call("sudo service dnsmasq start".split())
 
@@ -135,7 +137,7 @@ def stop_afo_patching(afo_patcher_rule: iptc.Rule):
 def start_service(name):
     try:
         logger.info("Starting {} process - Thanks Jonas Karlsson!".format(name))
-        with open(os.devnull, 'wb') as devnull:
+        with open(os.devnull, "wb") as devnull:
             subprocess.check_call(["sudo", "service", name, "start"], stdout=devnull)
     except (subprocess.CalledProcessError, IOError):
         logging.warning("Unable to start the {} process".format(name))
@@ -144,7 +146,7 @@ def start_service(name):
 def stop_service(name):
     try:
         logger.info("Stopping {} process".format(name))
-        with open(os.devnull, 'wb') as devnull:
+        with open(os.devnull, "wb") as devnull:
             subprocess.check_call(["sudo", "service", name, "stop"], stdout=devnull)
     except (subprocess.CalledProcessError, IOError):
         logging.warning("Unable to stop the {} process".format(name))
@@ -155,8 +157,8 @@ def get_default_iface_name_linux():
     with open(route) as f:
         for line in f.readlines():
             try:
-                iface, dest, _, flags, _, _, _, _, _, _, _, =  line.strip().split()
-                if dest != '00000000' or not int(flags, 16) & 2:
+                iface, dest, _, flags, _, _, _, _, _, _, _, = line.strip().split()
+                if dest != "00000000" or not int(flags, 16) & 2:
                     continue
                 return iface
             except:
@@ -198,30 +200,23 @@ def autoconfigure_ppp(device, speed) -> str:
        Returns the IP allocated to the Dreamcast
     """
 
-    gateway_ip = subprocess.check_output("route -n | grep 'UG[ \t]' | awk '{print $2}'", shell=True).decode()
+    gateway_ip = subprocess.check_output(
+        "route -n | grep 'UG[ \t]' | awk '{print $2}'", shell=True
+    ).decode()
     subnet = gateway_ip.split(".")[:3]
 
-    PEERS_TEMPLATE = (
-        "{device}\n"
-        "{device_speed}\n"
-        "{this_ip}:{dc_ip}\n"
-        "noauth\n"
-    )
+    PEERS_TEMPLATE = "{device}\n" "{device_speed}\n" "{this_ip}:{dc_ip}\n" "noauth\n"
 
-    OPTIONS_TEMPLATE = (
-        "debug\n"
-        "ms-dns {this_ip}\n"
-        "proxyarp\n"
-        "ktune\n"
-        "noccp\n"
-    )
+    OPTIONS_TEMPLATE = "debug\n" "ms-dns {this_ip}\n" "proxyarp\n" "ktune\n" "noccp\n"
 
     this_ip = find_next_unused_ip(".".join(subnet) + ".100")
     dreamcast_ip = find_next_unused_ip(this_ip)
 
     logger.info("Dreamcast IP: {}".format(dreamcast_ip))
 
-    peers_content = PEERS_TEMPLATE.format(device=device, device_speed=speed, this_ip=this_ip, dc_ip=dreamcast_ip)
+    peers_content = PEERS_TEMPLATE.format(
+        device=device, device_speed=speed, this_ip=this_ip, dc_ip=dreamcast_ip
+    )
 
     with open("/etc/ppp/peers/dreamcast", "w") as f:
         f.write(peers_content)
@@ -234,7 +229,9 @@ def autoconfigure_ppp(device, speed) -> str:
     return dreamcast_ip
 
 
-ENABLE_SPEED_DETECTION = False  # Set this to true if you want to use wvdialconf for device detection
+ENABLE_SPEED_DETECTION = (
+    False
+)  # Set this to true if you want to use wvdialconf for device detection
 
 
 def detect_device_and_speed() -> Optional[Tuple[str, int]]:
@@ -299,7 +296,7 @@ class Daemon(object):
 
         atexit.register(self.delete_pid)
         pid = str(os.getpid())
-        with open(self.pidfile, 'w+') as f:
+        with open(self.pidfile, "w+") as f:
             f.write("%s\n" % pid)
 
     def delete_pid(self):
@@ -307,7 +304,7 @@ class Daemon(object):
 
     def _read_pid_from_pidfile(self):
         try:
-            with open(self.pidfile, 'r') as pf:
+            with open(self.pidfile, "r") as pf:
                 pid = int(pf.read().strip())
         except IOError:
             pid = None
@@ -414,9 +411,7 @@ class Modem(object):
 
         self._sending_tone = True
 
-        self._time_since_last_dial_tone = (
-            datetime.now() - timedelta(seconds=100)
-        )
+        self._time_since_last_dial_tone = datetime.now() - timedelta(seconds=100)
 
         self._dial_tone_counter = 0
 
@@ -442,7 +437,9 @@ class Modem(object):
         logger.info(subprocess.check_output(["pon", "dreamcast"]).decode())
         logger.info("Connected")
 
-    def send_command(self, command: bytes, timeout=60, ignore_responses: Optional[List[bytes]]=None):
+    def send_command(
+        self, command: bytes, timeout=60, ignore_responses: Optional[List[bytes]] = None
+    ):
         if self._serial is None:
             raise Exception("Not connected")
         if ignore_responses is None:
@@ -469,11 +466,13 @@ class Modem(object):
             line = line + new_data
             for resp in VALID_RESPONSES:
                 if resp in line:
-                    logger.info(line[line.find(resp):].decode())
+                    logger.info(line[line.find(resp) :].decode())
                     return  # We are done
 
             if (datetime.now() - start).total_seconds() > timeout:
-                raise IOError("There was a timeout while waiting for a response from the modem")
+                raise IOError(
+                    "There was a timeout while waiting for a response from the modem"
+                )
 
     def send_escape(self):
         if self._serial is None:
@@ -494,8 +493,14 @@ class Modem(object):
             if self._serial is None:
                 raise Exception("Not connected")
 
-            if not self._time_since_last_dial_tone or ((now - (self._time_since_last_dial_tone)).microseconds * 1000) >= TIME_BETWEEN_UPLOADS_MS:
-                byte = self._dial_tone_wav[self._dial_tone_counter:self._dial_tone_counter+BUFFER_LENGTH]
+            if (
+                not self._time_since_last_dial_tone
+                or ((now - (self._time_since_last_dial_tone)).microseconds * 1000)
+                >= TIME_BETWEEN_UPLOADS_MS
+            ):
+                byte = self._dial_tone_wav[
+                    self._dial_tone_counter : self._dial_tone_counter + BUFFER_LENGTH
+                ]
                 self._dial_tone_counter += BUFFER_LENGTH
                 if self._dial_tone_counter >= len(self._dial_tone_wav):
                     self._dial_tone_counter = 0
@@ -520,7 +525,7 @@ def process():
     dial_tone_enabled = "--disable-dial-tone" not in sys.argv
 
     # Make sure pppd isn't running
-    with open(os.devnull, 'wb') as devnull:
+    with open(os.devnull, "wb") as devnull:
         subprocess.call(["sudo", "killall", "pppd"], stderr=devnull)
 
     device_and_speed, internet_connected = None, False
@@ -602,7 +607,9 @@ def process():
             dcnow.go_online()
 
             # We start watching /var/log/messages for the hang up message
-            for line in sh.tail("-f", "/var/log/messages", "-n", "1", _iter=True): # type: ignore - sh module is dynamic
+            for line in sh.tail(
+                "-f", "/var/log/messages", "-n", "1", _iter=True
+            ):  # type: ignore - sh module is dynamic
                 line: str = line
                 if "Modem hangup" in line:
                     logger.info("Detected modem hang up, going back to listening")
@@ -677,10 +684,12 @@ def main():
         logger.info("Dreampi quit successfully")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     logger.setLevel(logging.INFO)
-    syslog_handler = logging.handlers.SysLogHandler(address='/dev/log')
-    syslog_handler.setFormatter(logging.Formatter('%(name)s[%(process)d]: %(levelname)s %(message)s'))
+    syslog_handler = logging.handlers.SysLogHandler(address="/dev/log")
+    syslog_handler.setFormatter(
+        logging.Formatter("%(name)s[%(process)d]: %(levelname)s %(message)s")
+    )
     logger.addHandler(syslog_handler)
 
     if len(sys.argv) > 1 and "--no-daemon" in sys.argv:
