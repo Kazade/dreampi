@@ -1,6 +1,10 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
+from __future__ import absolute_import
+from __future__ import print_function
 
 import atexit
+from typing import List, Optional, Tuple
 import serial
 import socket
 import os
@@ -12,11 +16,11 @@ import subprocess
 import sh
 import signal
 import re
-import config_server
-import urllib
-import urllib2
 import iptc
+import urllib.request
+import urllib.error
 
+import config_server
 from dcnow import DreamcastNowService
 from port_forwarding import PortForwarding
 
@@ -65,38 +69,43 @@ def update_dns_file():
         Download a DNS settings file for the DreamPi configuration (avoids forwarding requests to the main DNS server
         and provides a backup if that ever goes down)
     """
+    # check for a remote configuration
     try:
-        response = urllib2.urlopen(DNS_FILE)
-        # Stop the server
-        subprocess.check_call("sudo service dnsmasq stop".split())
+        response = urllib.request.urlopen(DNS_FILE)
+    except urllib.error.HTTPError as e:
+        logging.info(f"Did not find remote DNS config (HTTP code {e.code}); will use upstream")
+        return
+    except urllib.error.URLError as e:
+        logging.exception("Failed to check for remote DNS config")
+        return
+    
+    # Stop the server
+    subprocess.check_call("sudo service dnsmasq stop".split())
 
-        # Update the configuration
+    # Update the configuration
+    try:
         with open("/etc/dnsmasq.d/dreampi.conf", "w") as f:
             f.write(response.read())
-
-        # Start the server again
-        subprocess.check_call("sudo service dnsmasq start".split())
-    except (urllib2.URLError, urllib2.HTTPError, IOError):
-        logging.exception("Unable to update the DNS file for some reason, will use upstream")
-        pass
-
-
-afo_patcher = None
+    except IOError:
+        logging.exception("Found remote DNS config but failed to apply it locally")
+    
+    # Start the server again
+    subprocess.check_call("sudo service dnsmasq start".split())
 
 
 def start_afo_patching():
     global afo_patcher
 
-    def fetch_replacement_ip():
+    def fetch_replacement_ip() -> Optional[str]:
         url = "http://dreamcast.online/afo.txt"
         try:
-            return urllib.urlopen(url).read().strip()
+            return urllib.request.urlopen(url).read().strip().decode()
         except IOError:
             return None
 
     replacement = fetch_replacement_ip()
 
-    if not replacement:
+    if replacement is None:
         logger.warning("Not starting AFO patch as couldn't get IP from server")
         return
 
@@ -111,20 +120,19 @@ def start_afo_patching():
 
     chain.append_rule(rule)
 
-    afo_patcher = rule
     logger.info("AFO routing enabled")
+    return rule
 
 
-def stop_afo_patching():
-    global afo_patcher
-    if afo_patcher:
+def stop_afo_patching(afo_patcher_rule: iptc.Rule):
+    if afo_patcher_rule:
         table = iptc.Table(iptc.Table.NAT)
         chain = iptc.Chain(table, "PREROUTING")
-        chain.delete_rule(afo_patcher)
+        chain.delete_rule(afo_patcher_rule)
         logger.info("AFO routing disabled")
 
 
-def start_process(name):
+def start_service(name):
     try:
         logger.info("Starting {} process - Thanks Jonas Karlsson!".format(name))
         with open(os.devnull, 'wb') as devnull:
@@ -133,7 +141,7 @@ def start_process(name):
         logging.warning("Unable to start the {} process".format(name))
 
 
-def stop_process(name):
+def stop_service(name):
     try:
         logger.info("Stopping {} process".format(name))
         with open(os.devnull, 'wb') as devnull:
@@ -157,7 +165,7 @@ def get_default_iface_name_linux():
 
 def ip_exists(ip, iface):
     command = ["arp", "-a"]
-    output = subprocess.check_output(command)
+    output = subprocess.check_output(command).decode()
     if ("(%s)" % ip) in output:
         logger.info("IP existed at %s", ip)
         return True
@@ -181,7 +189,7 @@ def find_next_unused_ip(start):
     raise Exception("Unable to find a free IP on the network")
 
 
-def autoconfigure_ppp(device, speed):
+def autoconfigure_ppp(device, speed) -> str:
     """
        Every network is different, this function runs on boot and tries
        to autoconfigure PPP as best it can by detecting the subnet and gateway
@@ -190,23 +198,23 @@ def autoconfigure_ppp(device, speed):
        Returns the IP allocated to the Dreamcast
     """
 
-    gateway_ip = subprocess.check_output("route -n | grep 'UG[ \t]' | awk '{print $2}'", shell=True)
+    gateway_ip = subprocess.check_output("route -n | grep 'UG[ \t]' | awk '{print $2}'", shell=True).decode()
     subnet = gateway_ip.split(".")[:3]
 
-    PEERS_TEMPLATE = """
-{device}
-{device_speed}
-{this_ip}:{dc_ip}
-noauth
-    """.strip()
+    PEERS_TEMPLATE = (
+        "{device}\n"
+        "{device_speed}\n"
+        "{this_ip}:{dc_ip}\n"
+        "noauth\n"
+    )
 
-    OPTIONS_TEMPLATE = """
-debug
-ms-dns {}
-proxyarp
-ktune
-noccp
-    """.strip()
+    OPTIONS_TEMPLATE = (
+        "debug\n"
+        "ms-dns {this_ip}\n"
+        "proxyarp\n"
+        "ktune\n"
+        "noccp\n"
+    )
 
     this_ip = find_next_unused_ip(".".join(subnet) + ".100")
     dreamcast_ip = find_next_unused_ip(this_ip)
@@ -218,7 +226,7 @@ noccp
     with open("/etc/ppp/peers/dreamcast", "w") as f:
         f.write(peers_content)
 
-    options_content = OPTIONS_TEMPLATE.format(this_ip)
+    options_content = OPTIONS_TEMPLATE.format(this_ip=this_ip)
 
     with open("/etc/ppp/options", "w") as f:
         f.write(options_content)
@@ -229,7 +237,7 @@ noccp
 ENABLE_SPEED_DETECTION = False  # Set this to true if you want to use wvdialconf for device detection
 
 
-def detect_device_and_speed():
+def detect_device_and_speed() -> Optional[Tuple[str, int]]:
     MAX_SPEED = 57600
 
     if not ENABLE_SPEED_DETECTION:
@@ -241,15 +249,15 @@ def detect_device_and_speed():
     command = ["wvdialconf", "/dev/null"]
 
     try:
-        output = subprocess.check_output(command, stderr=subprocess.STDOUT)
+        output = subprocess.check_output(command, stderr=subprocess.STDOUT).decode()
 
         lines = output.split("\n")
 
         for line in lines:
-            match = re.match("(.+)\<Info\>\:\sSpeed\s(\d+);", line.strip())
+            match = re.match(r"(.+)<Info>:\sSpeed\s(\d+);", line.strip())
             if match:
-                device = match.group(1)
-                speed = match.group(2)
+                device: str = match.group(1)
+                speed = int(match.group(2))
                 logger.info("Detected device {} with speed {}".format(device, speed))
 
                 # Many modems report speeds higher than they can handle so we cap
@@ -259,8 +267,9 @@ def detect_device_and_speed():
             logger.info("No device detected")
 
     except:
-        logger.exception("Unable to detect modem. Falling back to ttyACM0")
-    return ("ttyACM0", MAX_SPEED)
+        logger.exception("Unable to detect modem.")
+
+    return None
 
 
 class Daemon(object):
@@ -342,9 +351,9 @@ class Daemon(object):
 
 
 class Modem(object):
-    def __init__(self, device, speed, send_dial_tone=True):
+    def __init__(self, device: str, speed: int, send_dial_tone=True):
         self._device, self._speed = device, speed
-        self._serial = None
+        self._serial: Optional[serial.Serial] = None
         self._sending_tone = False
 
         if send_dial_tone:
@@ -381,6 +390,7 @@ class Modem(object):
         self._serial = serial.Serial(
             "/dev/{}".format(self._device), self._speed, timeout=0
         )
+        return self._serial
 
     def disconnect(self):
         if self._serial and self._serial.isOpen():
@@ -389,18 +399,18 @@ class Modem(object):
             logger.info("Serial interface terminated")
 
     def reset(self):
-        self.send_command("ATZ0")  # Send reset command
-        self.send_command("ATE0")  # Don't echo our responses
+        self.send_command(b"ATZ0")  # Send reset command
+        self.send_command(b"ATE0")  # Don't echo our responses
 
     def start_dial_tone(self):
         if not self._dial_tone_wav:
             return
 
         self.reset()
-        self.send_command("AT+FCLASS=8")  # Enter voice mode
-        self.send_command("AT+VLS=1")  # Go off-hook
-        self.send_command("AT+VSM=1,8000")  # 8 bit unsigned PCM
-        self.send_command("AT+VTX")  # Voice transmission mode
+        self.send_command(b"AT+FCLASS=8")  # Enter voice mode
+        self.send_command(b"AT+VLS=1")  # Go off-hook
+        self.send_command(b"AT+VSM=1,8000")  # 8 bit unsigned PCM
+        self.send_command(b"AT+VTX")  # Voice transmission mode
 
         self._sending_tone = True
 
@@ -413,10 +423,12 @@ class Modem(object):
     def stop_dial_tone(self):
         if not self._sending_tone:
             return
+        if self._serial is None:
+            raise Exception("Not connected")
 
-        self._serial.write("\0{}{}\r\n".format(chr(0x10), chr(0x03)))
+        self._serial.write(b"\x00\x10\x03\r\n")
         self.send_escape()
-        self.send_command("ATH0")  # Go on-hook
+        self.send_command(b"ATH0")  # Go on-hook
         self.reset()  # Reset the modem
         self._sending_tone = False
 
@@ -424,27 +436,30 @@ class Modem(object):
         self.reset()
         # When we send ATA we only want to look for CONNECT. Some modems respond OK then CONNECT
         # and that messes everything up
-        self.send_command("ATA", ignore_responses=["OK"])
+        self.send_command(b"ATA", ignore_responses=[b"OK"])
         time.sleep(5)
         logger.info("Call answered!")
-        logger.info(subprocess.check_output(["pon", "dreamcast"]))
+        logger.info(subprocess.check_output(["pon", "dreamcast"]).decode())
         logger.info("Connected")
 
-    def send_command(self, command, timeout=60, ignore_responses=None):
-        ignore_responses = ignore_responses or []  # Things to completely ignore
+    def send_command(self, command: bytes, timeout=60, ignore_responses: Optional[List[bytes]]=None):
+        if self._serial is None:
+            raise Exception("Not connected")
+        if ignore_responses is None:
+            ignore_responses = []
 
-        VALID_RESPONSES = ["OK", "ERROR", "CONNECT", "VCON"]
+        VALID_RESPONSES = [b"OK", b"ERROR", b"CONNECT", b"VCON"]
 
         for ignore in ignore_responses:
             VALID_RESPONSES.remove(ignore)
 
-        final_command = "%s\r\n" % command
+        final_command = b"%b\r\n" % command
         self._serial.write(final_command)
-        logger.info(final_command)
+        logger.info(final_command.decode())
 
         start = datetime.now()
 
-        line = ""
+        line = b""
         while True:
             new_data = self._serial.readline().strip()
 
@@ -454,15 +469,17 @@ class Modem(object):
             line = line + new_data
             for resp in VALID_RESPONSES:
                 if resp in line:
-                    logger.info(line[line.find(resp):])
+                    logger.info(line[line.find(resp):].decode())
                     return  # We are done
 
             if (datetime.now() - start).total_seconds() > timeout:
                 raise IOError("There was a timeout while waiting for a response from the modem")
 
     def send_escape(self):
+        if self._serial is None:
+            raise Exception("Not connected")
         time.sleep(1.0)
-        self._serial.write("+++")
+        self._serial.write(b"+++")
         time.sleep(1.0)
 
     def update(self):
@@ -472,8 +489,12 @@ class Modem(object):
             BUFFER_LENGTH = 1000
             TIME_BETWEEN_UPLOADS_MS = (1000.0 / 8000.0) * BUFFER_LENGTH
 
-            milliseconds = (now - self._time_since_last_dial_tone).microseconds * 1000
-            if not self._time_since_last_dial_tone or milliseconds >= TIME_BETWEEN_UPLOADS_MS:
+            if self._dial_tone_wav is None:
+                raise Exception("Dial tone wav not loaded")
+            if self._serial is None:
+                raise Exception("Not connected")
+
+            if not self._time_since_last_dial_tone or ((now - (self._time_since_last_dial_tone)).microseconds * 1000) >= TIME_BETWEEN_UPLOADS_MS:
                 byte = self._dial_tone_wav[self._dial_tone_counter:self._dial_tone_counter+BUFFER_LENGTH]
                 self._dial_tone_counter += BUFFER_LENGTH
                 if self._dial_tone_counter >= len(self._dial_tone_wav):
@@ -526,15 +547,15 @@ def process():
     dreamcast_ip = autoconfigure_ppp(modem.device_name, modem.device_speed)
 
     # Get a port forwarding object, now that we know the DC IP.
-    # port_forwarding = PortForwarding(dreamcast_ip, logger)
-
-    # Disabled until we can figure out a faster way of doing this.. it takes a minute
-    # on my router which is way too long to wait for the DreamPi to boot
-    # port_forwarding.forward_all()
+    if "--enable-port-forwarding" in sys.argv:
+        port_forwarding = PortForwarding(dreamcast_ip, logger)
+        port_forwarding.forward_all()
+    else:
+        port_forwarding = None
 
     mode = "LISTENING"
 
-    modem.connect()
+    modem_serial = modem.connect()
     if dial_tone_enabled:
         modem.start_dial_tone()
 
@@ -550,23 +571,27 @@ def process():
 
         if mode == "LISTENING":
             modem.update()
-            char = modem._serial.read(1).strip()
+            char: bytes = modem_serial.read(1)
+            char = char.strip()
             if not char:
                 continue
 
             if ord(char) == 16:
                 # DLE character
                 try:
-                    char = modem._serial.read(1)
-                    digit = int(char)
-                    logger.info("Heard: %s", digit)
+                    char = modem_serial.read(1)
+                    if char.isdigit():
+                        digit = int(char)
+                        logger.info("Heard: %s", digit)
 
-                    mode = "ANSWERING"
-                    modem.stop_dial_tone()
-                    time_digit_heard = now
-                except (TypeError, ValueError):
-                    pass
+                        mode = "ANSWERING"
+                        modem.stop_dial_tone()
+                        time_digit_heard = now
+                except TypeError as e:
+                    logger.exception(e)
         elif mode == "ANSWERING":
+            if time_digit_heard is None:
+                raise Exception("Impossible code path")
             if (now - time_digit_heard).total_seconds() > 8.0:
                 time_digit_heard = None
                 modem.answer()
@@ -574,10 +599,11 @@ def process():
                 mode = "CONNECTED"
 
         elif mode == "CONNECTED":
-            dcnow.go_online(dreamcast_ip)
+            dcnow.go_online()
 
             # We start watching /var/log/messages for the hang up message
-            for line in sh.tail("-f", "/var/log/messages", "-n", "1", _iter=True):
+            for line in sh.tail("-f", "/var/log/messages", "-n", "1", _iter=True): # type: ignore - sh module is dynamic
+                line: str = line
                 if "Modem hangup" in line:
                     logger.info("Detected modem hang up, going back to listening")
                     time.sleep(5)  # Give the hangup some time
@@ -591,8 +617,9 @@ def process():
             if dial_tone_enabled:
                 modem.start_dial_tone()
 
-    # Temporarily disabled, see above
-    # port_forwarding.delete_all()
+    if port_forwarding is not None:
+        port_forwarding.delete_all()
+
     return 0
 
 
@@ -613,6 +640,8 @@ def enable_prom_mode_on_wlan0():
 
 
 def main():
+    afo_patcher_rule = None
+
     try:
         # Don't do anything until there is an internet connection
         while not check_internet_connection():
@@ -629,19 +658,20 @@ def main():
         restart_dnsmasq()
 
         config_server.start()
-        start_afo_patching()
-        start_process("dcvoip")
-        start_process("dcgamespy")
-        start_process("dc2k2")
+        afo_patcher_rule = start_afo_patching()
+        start_service("dcvoip")
+        start_service("dcgamespy")
+        start_service("dc2k2")
         return process()
     except:
         logger.exception("Something went wrong...")
         return 1
     finally:
-        stop_process("dc2k2")
-        stop_process("dcgamespy")
-        stop_process("dcvoip")
-        stop_afo_patching()
+        stop_service("dc2k2")
+        stop_service("dcgamespy")
+        stop_service("dcvoip")
+        if afo_patcher_rule is not None:
+            stop_afo_patching(afo_patcher_rule)
 
         config_server.stop()
         logger.info("Dreampi quit successfully")
@@ -649,11 +679,12 @@ def main():
 
 if __name__ == '__main__':
     logger.setLevel(logging.INFO)
-    handler = logging.handlers.SysLogHandler(address='/dev/log')
-    logger.addHandler(handler)
+    syslog_handler = logging.handlers.SysLogHandler(address='/dev/log')
+    syslog_handler.setFormatter(logging.Formatter('%(name)s[%(process)d]: %(levelname)s %(message)s'))
+    logger.addHandler(syslog_handler)
 
     if len(sys.argv) > 1 and "--no-daemon" in sys.argv:
-        logger.addHandler(logging.StreamHandler())
+        # logger.addHandler(logging.StreamHandler())
         sys.exit(main())
 
     daemon = Daemon("/tmp/dreampi.pid", main)
@@ -669,5 +700,5 @@ if __name__ == '__main__':
             sys.exit(2)
         sys.exit(0)
     else:
-        print("Usage: %s start|stop|restart" % sys.argv[0])
+        print(("Usage: %s start|stop|restart" % sys.argv[0]))
         sys.exit(2)

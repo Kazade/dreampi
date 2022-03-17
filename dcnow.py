@@ -1,14 +1,17 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
+from __future__ import absolute_import
 
 import threading
 import os
 import json
 import time
 import logging
-import urllib
-import urllib2
-import sh
-
+import logging.handlers
+import urllib.request
+import urllib.parse
+import sh # type: ignore - sh module is dynamic
+from typing import List, Optional
 from hashlib import sha256
 
 from uuid import getnode as get_mac
@@ -23,25 +26,26 @@ UPDATE_INTERVAL = 15
 CONFIGURATION_FILE = os.path.expanduser("~/.dreampi.json")
 
 
-def scan_mac_address():
+def hash_mac_address():
     mac = get_mac()
-    return sha256(':'.join(("%012X" % mac)[i:i+2] for i in range(0, 12, 2))).hexdigest()
+    return sha256(':'.join(("%012X" % mac)[i:i+2] for i in range(0, 12, 2)).encode()).hexdigest()
 
 
 class DreamcastNowThread(threading.Thread):
-    def __init__(self, service):
+    def __init__(self, service: "DreamcastNowService"):
         self._service = service
         self._running = True
         super(DreamcastNowThread, self).__init__()
 
     def run(self):
         def post_update():
-            if not self._service._enabled:
+            if not self._service.enabled:
                 return
 
-            lines = [ x for x in sh.tail("/var/log/syslog", "-n", "10", _iter=True) ]
+            lines: List[str] = list(sh.tail("/var/log/syslog", "-n", "10", _iter=True)) # type: ignore - sh has dynamic members
             dns_query = None
             for line in lines[::-1]:
+                line: str = line
                 if "CONNECT" in line and "dreampi" in line:
                     # Don't seek back past connection
                     break
@@ -50,19 +54,19 @@ class DreamcastNowThread(threading.Thread):
                     # We did a DNS lookup, what was it?
                     remainder = line[line.find("query[A]") + len("query[A]"):].strip()
                     domain = remainder.split(" ", 1)[0].strip()
-                    dns_query = sha256(domain).hexdigest()
+                    dns_query = sha256(domain.encode()).hexdigest()
                     break
 
             user_agent = 'Mozilla/4.0 (compatible; MSIE 5.5; Windows NT), Dreamcast Now'
             header = { 'User-Agent' : user_agent }
-            mac_address = self._service._mac_address
+            mac_address = self._service.mac_address_hash
             data = {}
             if dns_query:
                 data["dns_query"] = dns_query
 
-            data = urllib.urlencode(data)
-            req = urllib2.Request(API_ROOT + UPDATE_END_POINT.format(mac_address=mac_address), data, header)
-            urllib2.urlopen(req) # Send POST update
+            data = urllib.parse.urlencode(data).encode()
+            req = urllib.request.Request(API_ROOT + UPDATE_END_POINT.format(mac_address=mac_address), data, header)
+            urllib.request.urlopen(req) # Send POST update
 
         while self._running:
             try:
@@ -79,17 +83,18 @@ class DreamcastNowThread(threading.Thread):
 class DreamcastNowService(object):
     def __init__(self):
         self._thread = None
-        self._mac_address = None
-        self._enabled = True
+        self._mac_address_hash: Optional[str] = None
+        self._enabled: bool = True
         self.reload_settings()
 
         logger.setLevel(logging.INFO)
-        handler = logging.handlers.SysLogHandler(address='/dev/log')
-        logger.addHandler(handler)
+        syslog_handler = logging.handlers.SysLogHandler(address='/dev/log')
+        syslog_handler.setFormatter(logging.Formatter('%(name)s[%(process)d]: %(levelname)s %(message)s'))
+        logger.addHandler(syslog_handler)
 
-    def update_mac_address(self, dreamcast_ip):
-        self._mac_address = scan_mac_address()
-        logger.info("MAC address: {}".format(self._mac_address))
+    def update_mac_address(self):
+        self._mac_address_hash = hash_mac_address()
+        logger.info("MAC address: {}".format(self._mac_address_hash))
 
     def reload_settings(self):
         settings_file = CONFIGURATION_FILE
@@ -99,14 +104,23 @@ class DreamcastNowService(object):
                 content = json.loads(settings.read())
                 self._enabled = content["enabled"]
 
-    def go_online(self, dreamcast_ip):
+    def go_online(self):
         if not self._enabled:
             return
 
-        self.update_mac_address(dreamcast_ip)
+        self.update_mac_address()
         self._thread = DreamcastNowThread(self)
         self._thread.start()
 
     def go_offline(self):
-        self._thread.stop()
-        self._thread = None
+        if self._thread is not None:
+            self._thread.stop()
+            self._thread = None
+    
+    @property
+    def enabled(self):
+        return self._enabled
+    
+    @property
+    def mac_address_hash(self):
+        return self._mac_address_hash

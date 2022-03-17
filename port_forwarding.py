@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+
+from __future__ import absolute_import
+
+from logging import Logger
+from typing import Any
 import miniupnpc
 
 class PortForwarding:
@@ -24,14 +30,14 @@ class PortForwarding:
         (17219, 'TCP', 'Worms World Party'),
         (37171, 'UDP', 'World Series Baseball 2K2'),
         (47624, 'TCP', 'PBA Tour Bowling 2001 / Starlancer'),
-        (range(2300, 2401), 'TCP', 'PBA Tour Bowling 2001 / Starlancer'),
-        (range(2300, 2401), 'UDP', 'PBA Tour Bowling 2001 / Starlancer')
+        (list(range(2300, 2401)), 'TCP', 'PBA Tour Bowling 2001 / Starlancer'),
+        (list(range(2300, 2401)), 'UDP', 'PBA Tour Bowling 2001 / Starlancer')
     ]
 
-    def __init__(self, dc_ip, logger):
+    def __init__(self, dc_ip: str, logger: Logger):
         self._dreamcast_ip = dc_ip
         self._logger = logger
-        self._upnp = miniupnpc.UPnP()
+        self._upnp: Any = miniupnpc.UPnP() # type: ignore - this module has no types
 
     def forward_all(self):
         """
@@ -58,7 +64,7 @@ class PortForwarding:
                     except Exception as e:
                         self._logger.warn("Could not create UPnP port mapping for {} ({}/{}): {}".format(game, port, proto, e))
 
-    def delete_all(self):
+    def delete_all(self) -> bool:
         """
             This method deletes all forwards, if possible. If the process returns an
             error, we keep trucking.
