@@ -166,7 +166,7 @@ def get_default_iface_name_linux():
 
 
 def ip_exists(ip, iface):
-    command = ["arp", "-a"]
+    command = ["arp", "-a", "-i", iface]
     output = subprocess.check_output(command).decode()
     if ("(%s)" % ip) in output:
         logger.info("IP existed at %s", ip)
