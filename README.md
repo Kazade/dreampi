@@ -2,7 +2,9 @@
 
 A daemon that creates a bridge between a Dreamcast's Dial-up Modem, and the Internet via the Pi
 
-```
+```shell
 sudo apt install ./arm/*.deb
-sudo apt install python3-miniupnpc python3-serial python3-sh python3-iptables
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
