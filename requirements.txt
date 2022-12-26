@@ -1,0 +1,5 @@
+pyserial
+sh
+http-server-base
+python-iptables
+miniupnpc
