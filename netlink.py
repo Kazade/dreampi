@@ -4,7 +4,7 @@ Created on Thu May 19 08:01:31 2022
 
 @author: joe
 """
-#netlink_version=202305171754
+#netlink_version=202306041400
 import sys
 
 if __name__ == "__main__":
@@ -331,6 +331,7 @@ def netlink_exchange(side,net_state,opponent,ser=ser):
         if side == "calling":
             Port = 20002
         udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        udp.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 184)
         udp.setblocking(0)
         udp.bind(('', Port))
         
@@ -516,6 +517,7 @@ def kddi_exchange(side,net_state,opponent,ser=ser):
         if side == "calling":
             Port = 20002
         udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        udp.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 184)
         udp.setblocking(0)
         udp.bind(('', Port))
         

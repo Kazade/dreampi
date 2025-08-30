@@ -1,4 +1,4 @@
-#xband_version=202305141942
+#xband_version=202306132113
 import sys
 
 if __name__ == "__main__":
@@ -28,13 +28,20 @@ opponent_port = 4000
 opponent_id = "11"
 sock_listen = None
 my_ip = "127.0.0.1"
-try:
-    r = requests.get("http://myipv4.p1.opendns.com/get_my_ip")
-    r.raise_for_status()
-    my_ip = r.json()['ip']
-except requests.exceptions.HTTPError:
-    logger.info("Couldn't get WAN IP")
-    my_ip = "127.0.0.1"
+
+def getWanIP():
+    try:
+        r = requests.get("http://myipv4.p1.opendns.com/get_my_ip")
+        r.raise_for_status()
+        my_ip = r.json()['ip']
+    except requests.exceptions.HTTPError:
+        logger.info("Couldn't get WAN IP")
+        my_ip = "127.0.0.1"
+    except requests.exceptions.SSLError:
+        logger.info("Couldn't get WAN IP")
+        my_ip = "127.0.0.1"
+    return my_ip
+
 
 if osName == 'posix': # should work on linux and Mac for USB modem, but untested.
     femtoSipPath = "/home/pi/dreampi/femtosip"
@@ -166,6 +173,7 @@ def ringPhone(oppIP,modem):
             if ready[0]:
                 data = sock_send.recv(1024)
                 if data == b'ACK RESET':
+                    my_ip = getWanIP()
                     sip = sip_ring.SIP('user','',opponent,opponent_port,local_ip = my_ip,protocol="udp")
                     sip.call(opponent_id,3)
                     sock_send.sendall(b'RING')
@@ -442,6 +450,7 @@ def netlink_exchange(side,net_state,opponent,ser=ser):
         if side == "calling":
             Port = 20002
         udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        udp.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 184)
         udp.setblocking(0)
         udp.bind(('', Port))
         

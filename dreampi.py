@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#dreampi.py_version=202305142148
+#dreampi.py_version=202402202004
 # from __future__ import absolute_import
 # from __future__ import print_function
 import atexit
@@ -25,10 +25,13 @@ from port_forwarding import PortForwarding
 
 from datetime import datetime, timedelta
 def updater():
+
+    if os.path.isfile("/boot/noautoupdates.txt") == True:
+        logger.info("Dreampi script auto updates are disabled")
+        return
     netlink_script_url = "https://raw.githubusercontent.com/eaudunord/Netlink/latest/tunnel/netlink.py"
-    dreampi_script_url = "https://raw.githubusercontent.com/eaudunord/dreampi/latest/dreampi.py"
     xband_script_url = "https://raw.githubusercontent.com/eaudunord/Netlink/latest/tunnel/xband.py"
-    checkScripts = [netlink_script_url,xband_script_url,dreampi_script_url]
+    checkScripts = [netlink_script_url,xband_script_url]
     restartFlag = False
     for script in checkScripts:
         url = script
@@ -63,6 +66,10 @@ def updater():
         except requests.exceptions.HTTPError:
             logger.info("Couldn't check updates for: %s" % local_script)
             continue
+
+        except requests.exceptions.SSLError:
+            logger.info("SSL error while checking for updates. System time may need to be synced")
+            return
 
     if restartFlag:
         logger.info('Updated. Rebooting')
@@ -116,7 +123,17 @@ def update_dns_file():
         response.raise_for_status()
     except requests.exceptions.HTTPError:
         logging.info(
-            "Did not find remote DNS confi; will use upstream"
+            "Did not find remote DNS config; will use upstream"
+        )
+        return
+    except requests.exceptions.Timeout:
+        logging.info(
+            "Request timed out; will use upstream"
+        )
+        return
+    except requests.exceptions.SSLError:
+        logging.info(
+            "SSL error; will use upstream"
         )
         return
 
@@ -134,12 +151,104 @@ def update_dns_file():
     subprocess.check_call("sudo service dnsmasq start".split())
 
 
+# Update dreampi.py if file exists in /boot
+def dreampi_py_local_update():
+    if os.path.isfile("/boot/dpiupdate.py") == False:
+        logger.info("No update file is found in /boot")
+        return
 
-afo_patcher = None
+    os.system("sudo mv /boot/dpiupdate.py /home/pi/dreampi/dreampi.py")
+    os.system("sudo chown pi:pi /home/pi/dreampi/dreampi.py")
+    os.system("sudo chmod +x /home/pi/dreampi/dreampi.py")
+    logger.info('Updated the dreampi.py from /boot/dpiupdate.py ... Rebooting')
+    os.system("sudo reboot")
 
+# Increase the TTL in the IP HDR from 30 to 64
+def add_increased_ttl():
+    table = iptc.Table(iptc.Table.MANGLE)
+    chain = iptc.Chain(table, "PREROUTING")
+
+    rule = iptc.Rule()
+    rule.in_interface = "ppp0"
+    rule.create_target("TTL").ttl_set = str(64)
+
+    chain.insert_rule(rule)
+
+    logger.info("DC TTL increased from 30 to 64")
+    return rule
+
+def remove_increased_ttl(ttl_rule):
+    if ttl_rule:
+        table = iptc.Table(iptc.Table.MANGLE)
+        chain = iptc.Chain(table, "PREROUTING")
+        chain.delete_rule(ttl_rule)
+        logger.info("DC TTL removed")
+
+# Add additional DNAT rules
+def start_dnat_rules():
+    rules = []
+
+    def fetch_replacement_ips():
+        url = "https://shumania.ddns.net/dnat.txt"
+        try:
+            r = requests.get(url, verify=False)
+            r.raise_for_status()
+            return r.text.strip()
+        except requests.exceptions.HTTPError:
+            logging.info(
+            "HTTP error; will skip adding DNAT rules"
+            )
+            return None
+        except requests.exceptions.Timeout:
+            logging.info(
+            "Request timed out; will skip adding DNAT rules"
+            )
+            return None
+        except requests.exceptions.SSLError:
+            logging.info(
+            "SSL error; will skip adding DNAT rules"
+            )
+            return None
+
+    data = fetch_replacement_ips()
+
+    if data is None:
+        logger.info("No DNAT rules added")
+        return None
+
+    for ips in data.splitlines():
+        ip = ips.split()
+        
+        if ip[0] is None:
+            logger.info("Missing SRC in DNAT rule - SKIP")
+            return None
+
+        if ip[1] is None:
+            logger.info("Missing DST in DNAT rule - SKIP")
+            return None
+ 
+        table = iptc.Table(iptc.Table.NAT)
+        chain = iptc.Chain(table, "PREROUTING")
+
+        rule = iptc.Rule()
+        rule.protocol = "tcp"
+        rule.dst = ip[0]
+        rule.create_target("DNAT")
+        rule.target.to_destination = ip[1]
+
+        chain.append_rule(rule)
+        logger.info("DNAT rule appended %s -> %s",ip[0],ip[1])
+        rules.append(rule)
+    return rules
+
+def remove_dnat_rule(drule):
+    if drule:
+        table = iptc.Table(iptc.Table.NAT)
+        chain = iptc.Chain(table, "PREROUTING")
+        chain.delete_rule(drule)
+        logger.info("DNAT rule removed")
 
 def start_afo_patching():
-    global afo_patcher
 
     def fetch_replacement_ip():
         url = "http://dreamcast.online/afo.txt"
@@ -179,10 +288,9 @@ def stop_afo_patching(afo_patcher_rule):
         chain.delete_rule(afo_patcher_rule)
         logger.info("AFO routing disabled")
 
-
 def start_service(name):
     try:
-        logger.info("Starting {} process - Thanks Jonas Karlsson!".format(name))
+        logger.info("Starting {} process - Thanks ShuoumaDC!".format(name))
         with open(os.devnull, "wb") as devnull:
             subprocess.check_call(["sudo", "service", name, "start"], stdout=devnull)
     except (subprocess.CalledProcessError, IOError):
@@ -251,9 +359,11 @@ def autoconfigure_ppp(device, speed):
     ).decode()
     subnet = gateway_ip.split(".")[:3]
 
-    PEERS_TEMPLATE = "{device}\n" "{device_speed}\n" "{this_ip}:{dc_ip}\n" "noauth\n"
+    PEERS_TEMPLATE = "{device}\n" "{device_speed}\n" "{this_ip}:{dc_ip}\n" "auth\n"
 
     OPTIONS_TEMPLATE = "debug\n" "ms-dns {this_ip}\n" "proxyarp\n" "ktune\n" "noccp\n"
+
+    PAP_SECRETS_TEMPLATE = "# Modded from dreampi.py\n" "# INBOUND connections\n" '*       *       ""      *' "\n"
 
     this_ip = find_next_unused_ip(".".join(subnet) + ".100")
     dreamcast_ip = find_next_unused_ip(this_ip)
@@ -271,6 +381,11 @@ def autoconfigure_ppp(device, speed):
 
     with open("/etc/ppp/options", "w") as f:
         f.write(options_content)
+
+    pap_secrets_content = PAP_SECRETS_TEMPLATE
+
+    with open("/etc/ppp/pap-secrets", "w") as f:
+        f.write(pap_secrets_content)
 
     return dreamcast_ip
 
@@ -450,18 +565,33 @@ class Modem(object):
             logger.info("Serial interface terminated")
 
     def reset(self):
-        self.send_command(b"ATZ0")  # Send reset command
-        self.send_command(b"ATE0")  # Don't echo our responses
+        while True:
+            try:
+                self.send_command("ATZ0",timeout=3)  # Send reset command
+                time.sleep(1)
+                self.send_command("AT&F0")
+                self.send_command("ATE0W2")  # Don't echo our responses
+                return
+            except IOError:
+                self.shake_it_off() # modem isn't responding. Try a harder reset
 
     def start_dial_tone(self):
         if not self._dial_tone_wav:
             return
-
-        self.reset()
-        self.send_command(b"AT+FCLASS=8")  # Enter voice mode
-        self.send_command(b"AT+VLS=1")  # Go off-hook
-        self.send_command(b"AT+VSM=1,8000")  # 8 bit unsigned PCM
-        self.send_command(b"AT+VTX")  # Voice transmission mode
+        i = 0
+        while i < 3:
+            try:
+                self.reset()
+                self.send_command(b"AT+FCLASS=8")  # Enter voice mode
+                self.send_command(b"AT+VLS=1")  # Go off-hook
+                self.send_command(b"AT+VSM=1,8000")  # 8 bit unsigned PCM
+                self.send_command(b"AT+VTX")  # Voice transmission mode
+                logger.info("<LISTENING>")
+                break
+            except IOError:
+                time.sleep(0.5)
+                i+=1
+                pass
 
         self._sending_tone = True
 
@@ -539,37 +669,34 @@ class Modem(object):
         for ignore in ignore_responses:
             VALID_RESPONSES.remove(ignore)
 
-        final_command = ("%s\r\n" % command).encode()
-        self._serial.write(final_command)
-        logger.info(final_command.decode())
+        if isinstance(command, bytes):
+            final_command = command + b'\r\n'
+        else:
+            final_command = ("%s\r\n" % command).encode() 
 
-        start = datetime.now()
-        errorCount = 0
+        self._serial.write(final_command)
+        logger.info('Command: %s' % final_command.decode())
+
+        start = time.time()
         line = b""
         while True:
             new_data = self._serial.readline().strip()
 
             if not new_data:
-                continue
+                if time.time() - start < timeout:
+                    continue
+                raise IOError("There was a timeout while waiting for a response from the modem")
 
             line = line + new_data
             for resp in VALID_RESPONSES:
                 if resp in line:
                     if resp != b"OK":
-                        print('Response: %s' % line.decode())
-                        if resp == b"ERROR" and errorCount < 4:
-                            errorCount += 1
-                            time.sleep(0.5)
-                            self._serial.write(final_command)
-                            line = b""
-                            break
+                        logger.info('Response: %s' % line.decode())
+                        if resp == b"ERROR":
+                            raise IOError("Command returned an error")
                     # logger.info(line[line.find(resp) :].decode())
                     return  # We are done
 
-            if (datetime.now() - start).total_seconds() > timeout:
-                raise IOError(
-                    "There was a timeout while waiting for a response from the modem"
-                )
 
     def send_escape(self):
         if self._serial is None:
@@ -577,6 +704,15 @@ class Modem(object):
         time.sleep(1.0)
         self._serial.write(b"+++")
         time.sleep(1.0)
+
+    def shake_it_off(self): #sometimes the modem gets stuck in data mode
+        for i in range(3):
+            self._serial.write(b'+')
+            time.sleep(0.2)
+        time.sleep(4)
+        self.send_command('ATH0') #make sure we're on hook
+        logger.info("Shook it off")
+
 
     def update(self):
         now = datetime.now()
@@ -746,6 +882,7 @@ def process():
                         elif dial_string == "00":
                             side = "waiting"
                             client = "direct_dial"
+                            saturn = False
                         elif dial_string[0:3] == "859":
                             try:
                                 kddi_opponent = dial_string
@@ -874,6 +1011,8 @@ def enable_prom_mode_on_wlan0():
 
 def main():
     afo_patcher_rule = None
+    ttl_rule = None
+    dnat_rules = []
 
     try:
         # Don't do anything until there is an internet connection
@@ -881,12 +1020,19 @@ def main():
             logger.info("Waiting for internet connection...")
             time.sleep(3)
         
-        #try auto updates
-#        updater()
+        #try auto updates /disabled for now
+        updater()
         global xband
         global netlink
-        import xband as xband
-        import netlink as netlink
+        try:
+            import xband as xband
+            import netlink as netlink
+        except ImportError:
+            logger.info("couldn't import xband or netlink modules")
+
+
+        # Dreampi local update check
+        dreampi_py_local_update()
 
         # Try to update the DNS configuration
         update_dns_file()
@@ -899,9 +1045,12 @@ def main():
 
         config_server.start()
         afo_patcher_rule = start_afo_patching()
+        dnat_rules = start_dnat_rules()
+        ttl_rule = add_increased_ttl()
         start_service("dcvoip")
         start_service("dcgamespy")
         start_service("dc2k2")
+        start_service("dcdaytona")
         return process()
     except:
         logger.exception("Something went wrong...")
@@ -910,8 +1059,14 @@ def main():
         stop_service("dc2k2")
         stop_service("dcgamespy")
         stop_service("dcvoip")
+        stop_service("dcdaytona")
         if afo_patcher_rule is not None:
             stop_afo_patching(afo_patcher_rule)
+        if ttl_rule is not None:
+            remove_increased_ttl(ttl_rule)
+        if dnat_rules is not None:
+            for drule in dnat_rules:
+                remove_dnat_rule(drule)
 
         config_server.stop()
         logger.info("Dreampi quit successfully")
