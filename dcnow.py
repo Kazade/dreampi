@@ -1,10 +1,12 @@
 #!/usr/bin/env python
-#dcnow.py_version=202512152004
+#dcnow.py_version=202609091030
 import threading
 import os
 import json
 import time
 import logging
+import socket
+import ssl
 import urllib
 import urllib2
 import sh
@@ -21,7 +23,16 @@ UPDATE_END_POINT = "/api/update/{mac_address}/"
 UPDATE_INTERVAL = 15
 
 CONFIGURATION_FILE = os.path.expanduser("~/.dreampi.json")
-gameloft = False
+
+# Hostnames shared by several games. DCNow maps a domain to a single game,
+# so re-sending one of these every UPDATE_INTERVAL would keep overwriting
+# the entry (including a manual correction). Report each one once per
+# session; later polls post an empty update to keep the session alive.
+SHARED_DOMAINS = (
+    "gameloft",
+    "onsen0.overworks.isao.net",
+)
+sent_shared = set()
 
 def scan_mac_address():
     mac = get_mac()
@@ -37,7 +48,6 @@ class DreamcastNowThread(threading.Thread):
         def post_update():
             if not self._service._enabled:
                 return
-            global gameloft
             lines = [ x for x in sh.tail("/var/log/syslog", "-n", "15", _iter=True) ]
             dns_query = None
             for line in lines[::-1]:
@@ -47,15 +57,16 @@ class DreamcastNowThread(threading.Thread):
                     domain = remainder.split(" ", 1)[0].strip()
                     dns_query = sha256(domain).hexdigest()
                     
-                    #Send monaco/pod/speed just once - Begin
-                    if gameloft and "gameloft" in domain: ## already sent, do not send again.
-                        dns_query = None
-                        break
-                    if "gameloft" in domain: ## first read, send.
-                        gameloft = True
+                    #Send shared-host games (monaco/pod/speed, onsen0) just once - Begin
+                    shared = next((d for d in SHARED_DOMAINS if d in domain), None)
+                    if shared is not None:
+                        if shared in sent_shared: ## already sent, do not send again.
+                            dns_query = None
+                            break
+                        sent_shared.add(shared) ## first read, send.
                         logger.info("Domain sent to DCNow API: " + domain)
                         break
-                    #Send monaco/pod/speed just once - End
+                    #Send shared-host games just once - End
 
                     if "appspot" in domain:
                         pass
@@ -72,11 +83,19 @@ class DreamcastNowThread(threading.Thread):
 
             data = urllib.urlencode(data)
             req = urllib2.Request(API_ROOT + UPDATE_END_POINT.format(mac_address=mac_address), data, header)
-            urllib2.urlopen(req) # Send POST update
+            # Explicit timeout: dreampi's check_internet_connection() calls
+            # socket.setdefaulttimeout(3) and never restores it, which is too
+            # tight for a TLS round trip to App Engine from a Pi.
+            urllib2.urlopen(req, timeout=15) # Send POST update
 
         while self._running:
             try:
                 post_update()
+            except (urllib2.URLError, ssl.SSLError, socket.error) as e:
+                # Transient network trouble is expected and self-correcting;
+                # the POST usually arrived and only the reply was lost. One
+                # line rather than a 20-line traceback every UPDATE_INTERVAL.
+                logger.info("Dreamcast Now update failed: %s" % e)
             except:
                 logger.exception("Couldn't update Dreamcast Now!")
             dcnow_run.wait(UPDATE_INTERVAL)
@@ -94,10 +113,14 @@ class DreamcastNowService(object):
         self.reload_settings()
 
         logger.setLevel(logging.INFO)
-        handler = logging.handlers.SysLogHandler(address='/dev/log')
-        logger.addHandler(handler)
-        formatter = logging.Formatter('%(name)s[%(process)d]: %(message)s')
-        handler.setFormatter(formatter)
+        # 'dcnow' is a module-level logger, so every DreamcastNowService()
+        # would add another handler to the same object and each message
+        # would be logged once per instance ever created.
+        if not logger.handlers:
+            handler = logging.handlers.SysLogHandler(address='/dev/log')
+            formatter = logging.Formatter('%(name)s[%(process)d]: %(message)s')
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
 
     def update_mac_address(self, dreamcast_ip):
         self._mac_address = scan_mac_address()
@@ -123,8 +146,10 @@ class DreamcastNowService(object):
         logger.info("DC Now Session Started")
 
     def go_offline(self):
-        global dcnow_run, gameloft
-        gameloft = False
+        global dcnow_run
+        sent_shared.clear()
+        if self._thread is None:
+            return  # go_online() never started a session (service disabled)
         dcnow_run.set()
         self._thread.stop()
         self._thread = None

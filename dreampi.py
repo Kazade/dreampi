@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#dreampi.py_version=202512152004
+#dreampi.py_version=202608171113
 # from __future__ import absolute_import
 # from __future__ import print_function
 import atexit
@@ -33,7 +33,7 @@ def updater():
         return
 
     scripts = {
-        "netlink.py": "https://raw.githubusercontent.com/eaudunord/Netlink/dpi2/tunnel/netlink.py",
+        "netlink.py": "https://raw.githubusercontent.com/eaudunord/Netlink/main/tunnel/netlink.py",
         "dreampi.py": "https://raw.githubusercontent.com/Kazade/dreampi/master/dreampi.py",
         "dcnow.py":   "https://raw.githubusercontent.com/Kazade/dreampi/master/dcnow.py",
     }
@@ -216,7 +216,7 @@ def iptables_add_if_missing(cmd):
     """
     Add an iptables rule only if it does not already exist.
     Supports -A (append) and -I (insert) commands.
-    
+
     Example:
         iptables_add_if_missing([
             "iptables", "-t", "mangle", "-I", "FORWARD",
@@ -250,32 +250,32 @@ def iptables_add_if_missing(cmd):
         subprocess.check_call(cmd)
 
 # Add SNAT and DNAT to the newly created interface
-def add_pseudo_interface_rules(interface, dc_ip, tun_ip):
-   
+def add_pseudo_interface_rules(dc_ip, tun_ip):
+
     iptables_add_if_missing([
         "iptables", "-t", "nat", "-I", "POSTROUTING",
-        "-o", interface, 
-        "-s", tun_ip, 
+        "!", "-o", "tun0",
+        "-s", tun_ip,
         "-j", "SNAT",
         "--to-source", dc_ip
     ])
 
     iptables_add_if_missing([
         "iptables", "-t", "nat", "-I", "PREROUTING",
-        "-i", interface, 
-        "-d", dc_ip, 
+        "!", "-i", "ppp0",
+        "-d", dc_ip,
         "-j", "DNAT",
         "--to-destination", tun_ip
     ])
- 
+
     logger.info("DC Alias interface rules added")
 
 # Removes SNAT and DNAT to the newly created interface
-def remove_pseudo_interface_rules(interface, dc_ip, tun_ip):
+def remove_pseudo_interface_rules(dc_ip, tun_ip):
 
     subprocess.call([
         "iptables", "-t", "nat", "-D", "POSTROUTING",
-        "-o", interface,
+        "!", "-o", "tun0",
         "-s", tun_ip,
         "-j", "SNAT",
         "--to-source", dc_ip
@@ -283,14 +283,14 @@ def remove_pseudo_interface_rules(interface, dc_ip, tun_ip):
 
     subprocess.call([
         "iptables", "-t", "nat", "-D", "PREROUTING",
-        "-i", interface,
+        "!", "-i", "ppp0",
         "-d", dc_ip,
         "-j", "DNAT",
         "--to-destination", tun_ip
     ])
 
     logger.info("DC Alias interface rules removed")
-   
+
 # Block INPUT to tun0, only accept ICMP and RELATED,ESTABLISHED
 # Accept forward traffic from or to the tun0 to avoid userspace
 # fixes to be applied
@@ -299,19 +299,43 @@ def add_vpn_rules(tun_ip):
 
     iptables_add_if_missing([
         "iptables", "-I", "INPUT",
-        "-i", "tun0", 
-        "-d", tun_ip, 
+        "-i", "tun0",
+        "-d", tun_ip,
         "-j", "DROP"
     ])
-    
+
     iptables_add_if_missing([
         "iptables", "-I", "INPUT",
-        "-i", "tun0",    
+        "-i", "tun0",
         "-d", tun_ip,
         "-p", "icmp",
         "-j", "ACCEPT"
     ])
-    
+
+    iptables_add_if_missing([
+        "iptables", "-I", "INPUT",
+        "-i", "tun0",
+        "-d", tun_ip,
+        "-p", "tcp",
+        "-m", "multiport",
+        "--dports", "65432,65433",
+        "-m", "state",
+        "--state", "NEW",
+        "-j", "ACCEPT"
+    ])
+
+    iptables_add_if_missing([
+        "iptables", "-I", "INPUT",
+        "-i", "tun0",
+        "-d", tun_ip,
+        "-p", "udp",
+        "-m", "multiport",
+        "--dports", "20001,20002",
+        "-m", "state",
+        "--state", "NEW",
+        "-j", "ACCEPT"
+    ])
+
     iptables_add_if_missing([
         "iptables", "-I", "INPUT",
         "-i", "tun0",
@@ -325,13 +349,13 @@ def add_vpn_rules(tun_ip):
         "-i", "tun0",
         "-j", "RETURN"
     ])
-  
+
     iptables_add_if_missing([
         "iptables", "-t", "mangle", "-I", "FORWARD",
         "-o", "tun0",
         "-j", "RETURN"
     ])
- 
+
     logger.info("DC VPN rules")
 
 def remove_vpn_rules(tun_ip):
@@ -342,7 +366,7 @@ def remove_vpn_rules(tun_ip):
         "-d", tun_ip,
         "-j", "DROP"
     ])
-  
+
     subprocess.call([
         "iptables", "-D", "INPUT",
         "-i", "tun0",
@@ -350,7 +374,7 @@ def remove_vpn_rules(tun_ip):
         "-p", "icmp",
         "-j", "ACCEPT"
     ])
-  
+
     subprocess.call([
         "iptables", "-D", "INPUT",
         "-i", "tun0",
@@ -364,11 +388,35 @@ def remove_vpn_rules(tun_ip):
         "-i", "tun0",
         "-j", "RETURN"
     ])
- 
+
     subprocess.call([
         "iptables", "-t", "mangle", "-D", "FORWARD",
         "-o", "tun0",
         "-j", "RETURN"
+    ])
+
+    subprocess.call([
+        "iptables", "-D", "INPUT",
+        "-i", "tun0",
+        "-d", tun_ip,
+        "-p", "tcp",
+        "-m", "multiport",
+        "--dports", "65432,65433",
+        "-m", "state",
+        "--state", "NEW",
+        "-j", "ACCEPT"
+    ])
+
+    subprocess.call([
+        "iptables", "-D", "INPUT",
+        "-i", "tun0",
+        "-d", tun_ip,
+        "-p", "udp",
+        "-m", "multiport",
+        "--dports", "20001,20002",
+        "-m", "state",
+        "--state", "NEW",
+        "-j", "ACCEPT"
     ])
 
     logger.info("DC VPN rules REMOVED")
@@ -384,7 +432,7 @@ def add_increased_ttl():
 def remove_increased_ttl():
     subprocess.call([
         "iptables", "-t", "mangle", "-D", "FORWARD",
-        "-i", "ppp0", 
+        "-i", "ppp0",
         "-j", "TTL", "--ttl-set", "64"
     ])
 
@@ -508,7 +556,7 @@ def create_alias_interface(dc_ip, tun_ip):
     except subprocess.CalledProcessError as e:
         logging.exception("Error: Could not create alias interface")
 
-    add_pseudo_interface_rules(interface, dc_ip, tun_ip)
+    add_pseudo_interface_rules(dc_ip, tun_ip)
 
 def remove_alias_interface():
     interface = get_default_iface_name_linux()
@@ -534,7 +582,7 @@ def remove_alias_interface():
     if dc_ip is not None and tun_ip is not None:
         tun_ip_obj = ipaddress.IPv4Address(unicode(tun_ip,'utf-8'))
         tun_dc_ip = tun_ip_obj + 1
-        remove_pseudo_interface_rules(interface, dc_ip, str(tun_dc_ip))
+        remove_pseudo_interface_rules(dc_ip, str(tun_dc_ip))
 
 def autoconfigure_ppp(device, speed):
     """
@@ -555,7 +603,7 @@ def autoconfigure_ppp(device, speed):
     OPTIONS_TEMPLATE = "debug\n" "ms-dns {this_ip}\n" "proxyarp\n" "ktune\n" "noccp\n"
 
     PAP_SECRETS_TEMPLATE = "# Modded from dreampi.py\n" "# INBOUND connections\n" '*       *       ""      *' "\n"
-     
+
     tun_ip =  get_ip_address("tun0")
     this_ip = find_next_unused_ip(".".join(subnet) + ".100")
     dreamcast_ip = find_next_unused_ip(this_ip)
@@ -563,11 +611,11 @@ def autoconfigure_ppp(device, speed):
     # Check if VPN is up and set IPs accordingly
     if tun_ip is not None:
         tun_ip_obj = ipaddress.IPv4Address(unicode(tun_ip,'utf-8'))
-        tun_dc_ip = tun_ip_obj + 1 
+        tun_dc_ip = tun_ip_obj + 1
         tun_this_ip = tun_dc_ip + 1
         add_vpn_rules(tun_ip)
         logger.info("TUN detected: tun0: %s ppp0: %s:%s", tun_ip, str(tun_this_ip), str(tun_dc_ip))
-        
+
         peers_content = PEERS_TEMPLATE.format(
             device=device, device_speed=speed, this_ip=tun_this_ip, dc_ip=tun_dc_ip
         )
@@ -751,7 +799,7 @@ class Modem(object):
             self._device, self._speed, timeout=0, exclusive=True
         )
         return self._serial
-    
+
     def connect_netlink(self,speed = 115200, timeout = 0.01, rtscts = False): #non-blocking
         if self._serial:
             self.disconnect()
@@ -837,7 +885,7 @@ class Modem(object):
         if isinstance(command, bytes):
             final_command = command + b'\r\n'
         else:
-            final_command = ("%s\r\n" % command).encode()      
+            final_command = ("%s\r\n" % command).encode()
         self._serial.write(final_command)
         logger.info(final_command.decode())
 
@@ -853,7 +901,7 @@ class Modem(object):
                 raise IOError()
 
             line = line + new_data
-            
+
             if response.encode() in line:
                 if response != "OK":
                     logger.info(line.decode())
@@ -875,7 +923,7 @@ class Modem(object):
         if isinstance(command, bytes):
             final_command = command + b'\r\n'
         else:
-            final_command = ("%s\r\n" % command).encode() 
+            final_command = ("%s\r\n" % command).encode()
 
         self._serial.write(final_command)
         logger.info('Command: %s' % command.decode())
@@ -983,7 +1031,7 @@ def process():
             logger.warn("Unable to find a modem device. Waiting...")
 
         time.sleep(5)
-    
+
     #
     # We have internet start openvpn client here
     #
@@ -1022,7 +1070,7 @@ def process():
         modem.start_dial_tone()
 
     time_digit_heard = None
-    
+
     netlink = netlink.Netlink(modem)
     dcnow = DreamcastNowService()
     while True:
@@ -1033,8 +1081,8 @@ def process():
 
         now = datetime.now()
 
-        if mode == "LISTENING":                
-            
+        if mode == "LISTENING":
+
             modem.update()
             char = modem._serial.read(1).strip().decode()
             if not char:
@@ -1058,13 +1106,19 @@ def process():
                 except (TypeError, ValueError):
                     logger.info("error")
                     pass
-                
+
         elif mode == "ANSWERING":
             if time_digit_heard is None:
                 raise Exception("Impossible code path")
             if (now - time_digit_heard).total_seconds() > 8.0:
                 time_digit_heard = None
-                modem.answer()
+                try:
+                    modem.answer()
+                except IOError:
+                    logger.info("Couldn't answer call. Going back to listening")
+                    modem.start_dial_tone()
+                    mode = "LISTENING"
+                    continue
                 modem.disconnect()
                 mode = "CONNECTED"
 
@@ -1076,22 +1130,38 @@ def process():
                 create_alias_interface(dreamcast_ip, str(tun_dc_ip))
 
             dcnow.go_online(dreamcast_ip)
-            
-            for line in sh.tail("-f", "/var/log/messages", "-n", "1", _iter=True):
+
+            # -F (not -f) so the tail reopens the file by name if logrotate
+            # rotates /var/log/messages mid-call. With -f it would keep reading
+            # the renamed inode, never see pppd's "Exit." and hang in CONNECTED.
+            for line in sh.tail("-F", "/var/log/messages", "-n", "1", _iter=True):
                 if "pppd" in line and "Exit" in line:#wait for pppd to execute the ip-down script
                     logger.info("Detected modem hang up, going back to listening")
                     break
-            
-            # Flush the IP on the alias interface 
+
+            # Flush the IP on the alias interface
             remove_alias_interface()
-            
+
             dcnow.go_offline() #changed dcnow to wait 15 seconds for event instead of sleeping. Should be faster.
             mode = "LISTENING"
             # modem = Modem(device_and_speed[0], device_and_speed[1], dial_tone_enabled)
             modem.connect()
+            time.sleep(1.5)
+            for i in range(3): # escape sequence
+                modem._serial.write(b'+')
+                time.sleep(0.2)
+            time.sleep(1.5)
+            try:
+                modem.query_modem("ATH0")
+            except IOError:
+                # Modem didn't acknowledge the hang up. Don't take the daemon
+                # down over it - start_dial_tone() calls reset(), which will
+                # shake_it_off() if the modem is still stuck in data mode.
+                logger.warning("No response to ATH0 after hang up, continuing")
+            time.sleep(1)
             if dial_tone_enabled:
                 modem.start_dial_tone()
-        
+
     if port_forwarding is not None:
         port_forwarding.delete_all()
     return 0
@@ -1119,10 +1189,10 @@ def main():
         while not check_internet_connection():
             logger.info("Waiting for internet connection...")
             time.sleep(3)
-        
+
         #try auto updates /disabled for now
         updater()
-   
+
         # Dreampi local update check
         dreampi_py_local_update()
 
@@ -1134,9 +1204,9 @@ def main():
 
         # Just make sure everything is fine
         restart_dnsmasq()
- 
+
         config_server.start()
-        
+
         add_increased_ttl()
         add_syn_check()
 
@@ -1144,8 +1214,8 @@ def main():
         start_service("dcgamespy")
         start_service("dc2k2")
         start_service("dcdaytona")
-        start_service("dcnatrules")  
- 
+        start_service("dcnatrules")
+
         return process()
     except:
         logger.exception("Something went wrong...")
@@ -1156,13 +1226,13 @@ def main():
         stop_service("dcvoip")
         stop_service("dcdaytona")
         stop_service("dcnatrules")
-        
-        tun_ip = get_ip_address("tun0")  
+
+        tun_ip = get_ip_address("tun0")
         stop_service("openvpn-client")
         remove_alias_interface()
-       
+
         if tun_ip is not None:
-            remove_vpn_rules(tun_ip)      
+            remove_vpn_rules(tun_ip)
 
         remove_increased_ttl()
         remove_syn_check()
